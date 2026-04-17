@@ -1,13 +1,13 @@
-# 📄 PDF Chatbot with RAG & Memory
+# 📄 Advanced PDF Chatbot with RAG & Dynamic Optimization
 
 An intelligent document assistant that allows you to chat with your PDF files. Built with **LangChain**, **OpenAI (GPT-4o-mini)**, and **Streamlit**.
 
-## 🚀 Features
-*   **RAG Implementation:** Uses Retrieval-Augmented Generation to answer questions based on your specific documents.
-*   **Conversation Memory:** Remembers context from previous questions for a natural chat experience.
-*   **Source Citations:** Shows exactly which page and paragraph the answer was pulled from.
-*   **Fast & Efficient:** Uses `ChromaDB` for high-speed semantic search.
-*   **User-Friendly UI:** Built with Streamlit for a clean, web-based interaction.
+## 🚀 Key Features
+*   **Dynamic Document Optimization:** Tailor the AI's reading strategy based on document type (Resume, Legal, Technical, etc.).
+*   **Contextual Memory:** Full conversation history support, allowing for natural follow-up questions.
+*   **Smart Source Citations:** View exactly which parts of the document were used to generate each answer, with a clean UI.
+*   **Session Management:** "Clear Chat" functionality to reset context without refreshing the app.
+*   **Backend Security:** Secure API key handling via environment variables (.env).
 
 ## 🛠️ Tech Stack
 *   **Framework:** LangChain
@@ -16,7 +16,13 @@ An intelligent document assistant that allows you to chat with your PDF files. B
 *   **Vector Store:** ChromaDB
 *   **Frontend:** Streamlit
 
-## ⚙️ Setup Instructions
+## ⚙️ Configuration Parameters
+The app dynamically adjusts these parameters based on your selection in the sidebar:
+- **Chunk Size:** Optimizes the length of text segments for better context.
+- **Overlap:** Ensures no information is lost between chunks.
+- **Search Depth (k):** Controls how many document segments the AI reviews before answering.
+
+## 💻 Installation & Setup
 
 1. **Clone the repository:**
    ```bash
