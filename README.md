@@ -1,64 +1,107 @@
 # ⚡ InsightStream RAG
+**High-Performance Document Intelligence & Parallel Orchestration**
 
-A high-performance **Retrieval-Augmented Generation (RAG)** application designed for accelerated career intelligence and document consultation. By leveraging asynchronous orchestration, **InsightStream RAG** achieves superior throughput compared to traditional sequential RAG pipelines.
+InsightStream RAG is a **Retrieval-Augmented Generation (RAG)** engine built around three
+problems that show up in real document work: extraction that fails silently, answers you
+can't trace back to the source, and latency on multi-part analysis.
 
-## 🚀 Key Engineering Highlights
+## 🚀 The Core Advantage: RAG vs. Vanilla LLM
+Modern LLMs have large context windows but remain prone to hallucination and offer no
+traceability. InsightStream grounds every answer in retrieved passages and shows them
+alongside the response, so each claim can be checked against the source text. Grounding
+reduces hallucination — it doesn't eliminate it, which is why the evidence is always one
+click away rather than hidden.
 
-*   **⚡ Parallel Async Orchestration:** Uses `asyncio.gather` (behind a semaphore that caps fan-out to respect API rate limits) to fire several independent analysis chains at once. These are separate calls rather than one combined prompt because each question needs *different chunks* — "payment terms" and "termination conditions" live in different parts of a contract, so one shared retrieval would serve both badly.
-*   **🎯 Adaptive RAG Strategy:** A single **Document Type** control drives both halves of the pipeline: indexing (`Chunk Size`, `Overlap`, `Retrieval Depth (k)`) and analysis (which question set the Strategic Analysis tab runs). A contract wants contract-shaped chunking *and* contract-shaped questions — they aren't independent choices.
-*   **⚖️ Retrieval Where It Earns Its Place:** Long documents (Legal/Book, Technical/Code) fan out into several independent questions, each with its own retrieval, run concurrently. Short documents don't: the Resume path deliberately skips retrieval and parallelism entirely and sends the complete document in one structured call, because chunking a two-page CV only discards information — and "which skills are missing?" is unanswerable from partial text.
-*   **🔍 OCR Fallback:** Automatically detects scanned/image-only PDFs and PDFs with a corrupted text layer (e.g. a broken embedded-font encoding — a real failure mode found in testing with Hebrew-generated PDFs), and retries extraction via Tesseract OCR instead of failing.
-*   **🛡️ Data Isolation & Privacy:** Each browser session gets its own ChromaDB collection, keyed to a session ID rather than the filename, so two users never share indexed data. All indexed data is in-memory only (nothing is written to disk), and the sidebar's **"🔥 Incinerate Document Data"** button deletes the active collection and resets the session on demand.
-*   **📊 Live Timing Telemetry:** The sidebar reports wall-clock time for your own chat queries and Strategic Analysis runs as you use the app. Note this is live telemetry, not a controlled sequential-vs-parallel benchmark — see "Performance Benchmarks" below.
+## 🛠️ Technical Challenges & Engineering Solutions
 
-## 🛠️ Tech Stack
+### 1. High-Throughput Parallel Orchestration
+Analysing a long document means asking several unrelated questions of it, which is slow
+one at a time.
+*   **The Fix:** `asyncio.gather` fires the question set concurrently, behind an
+    `asyncio.Semaphore` that caps fan-out to respect API rate limits.
+*   **Why separate calls:** each question needs *different chunks* — "payment terms" and
+    "termination conditions" live in different parts of a contract — so one shared
+    retrieval would serve all of them badly. The concurrency is architectural, not
+    decorative.
 
-*   **Orchestration:** [LangChain](https://langchain.com) (Async API)
-*   **LLM:** OpenAI GPT-4o-mini
-*   **Vector DB:** [ChromaDB](https://trychroma.com)
-*   **Frontend:** [Streamlit](https://streamlit.io)
+### 2. Extraction That Fails Loudly, Not Silently
+Text extraction can fail in two ways: returning nothing (scanned/image-only PDFs), or —
+far worse — returning confident nonsense.
+*   **The Finding:** a Hebrew contract whose embedded font carries no usable `ToUnicode`
+    CMap decodes to plausible-looking ASCII mojibake. PDFMiner, pypdf and PyMuPDF all
+    produce the *same* garbage, so no choice of loader fixes it. The file renders
+    perfectly on screen, because rendering draws glyphs and never consults that table.
+*   **The Fix:** a heuristic detector flags corrupted text layers, and extraction falls
+    back to OCR — PyMuPDF rasterises each page at 300 DPI and Tesseract reads the pixels,
+    bypassing the PDF's font structures entirely. If both paths fail, the app says so
+    rather than embedding garbage and answering from it.
 
-## ⚙️ Performance Benchmarks
+### 3. Retrieval Only Where It Earns Its Place
+RAG is the wrong tool for a short document. Chunking a two-page CV and retrieving top-k
+discards information, and "which skills are missing?" is unanswerable from partial text —
+the model can't distinguish *absent from the document* from *absent from the chunks I
+retrieved*.
+*   **The Fix:** long documents fan out into parallel, independently-retrieved questions.
+    The résumé path deliberately uses **neither** retrieval nor parallelism: one call, the
+    complete document in context, a structured (Pydantic) result.
 
-The Strategic Analysis tab has a **"Also run sequentially (benchmark)"** toggle.
-Enabling it re-runs the *identical* question set a second time, one call at a
-time, and reports both timings plus the speedup — so the comparison changes
-exactly one variable (execution strategy) while holding the workload constant.
+### 4. Adaptive Indexing Strategy
+Data density varies by document type — a dense résumé versus a sprawling legal contract.
+*   **The Fix:** a single **Document Type** control drives both halves of the pipeline:
+    indexing (**Chunk Size**, **Overlap**, **Retrieval Depth k**) and analysis (which
+    question set runs). A contract wants contract-shaped chunking *and* contract-shaped
+    questions; they aren't independent choices.
 
-This replaces an earlier comparison that measured a single chat query against a
-two-chain analysis run. That conflated workload size with execution strategy and
-so measured neither; any latency figures from this repo's history predating the
-toggle should be treated as unreliable.
+### 5. Stateless & Privacy-First Architecture
+*   **Zero-Storage Policy:** uploads exist only in ephemeral memory for the session. The
+    temp file the loader needs is deleted in a `finally` block, so nothing is left on disk.
+*   **Isolated Vector Collections:** each browser session gets a ChromaDB collection keyed
+    to a session UUID — never the filename — so two users uploading `resume.pdf` never
+    share indexed data.
+*   **On-Demand Teardown:** the **🔥 Incinerate** control deletes the active collection and
+    resets the session, so the data is gone when you say so rather than when the process
+    restarts.
+
+## 📊 Performance Benchmarks
+The Strategic Analysis tab has an **"Also run sequentially (benchmark)"** toggle. It
+re-runs the *identical* question set a second time, one call at a time, and reports both
+timings plus the speedup — changing exactly one variable (execution strategy) while
+holding the workload constant.
+
+Earlier figures in this repo's history compared a single chat query against a two-chain
+analysis run. That conflated workload size with execution strategy and therefore measured
+neither; treat any latency numbers predating this toggle as unreliable.
+
+## 🗺️ Roadmap
+*   **Evaluation harness:** a golden Q/A set with retrieval-quality and groundedness
+    evaluators, run as LangSmith experiments, so chunking changes can be judged on
+    measurements rather than intuition.
+*   **Node-wise tracing:** LangSmith tracing is wired up and **off by default** — enabling
+    it sends document chunks, prompts and answers to LangSmith's servers, which is a
+    deliberate choice rather than a default for anyone handling real contracts.
+*   **Hebrew document intelligence:** deeper support for RTL legal documents, the area
+    where the extraction work above has the most leverage.
 
 ## 💻 Installation & Setup
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com
-   cd insightstream-rag
-   ```
-
-2. **Install dependencies:**
+1. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-   The OCR fallback also needs the Tesseract binary installed locally (it
-   isn't pip-installable). On macOS:
+2. **Install Tesseract** (required for the OCR fallback; not pip-installable). On macOS:
    ```bash
-   brew install tesseract tesseract-lang   # tesseract-lang adds non-English language data, incl. Hebrew
+   brew install tesseract tesseract-lang   # tesseract-lang adds Hebrew and other languages
    ```
-   Without Tesseract installed, standard PDF extraction still works — only
-   the OCR fallback for scanned/corrupted PDFs is unavailable, and the app
-   will show a clear error explaining that instead of crashing.
+   Without it, normal PDFs work fine — only the OCR fallback is unavailable, and the app
+   reports that clearly instead of crashing.
 
-3. **Configure Environment:**
-   Create a `.env` file:
+3. **Configure environment** — create a `.env` file:
    ```text
    OPENAI_API_KEY=your_api_key_here
 
-   # Optional — LangSmith tracing, off by default. Flip to true to debug/demo;
-   # tracing sends document chunks, prompts, and answers to LangSmith's servers.
+   # Optional — LangSmith tracing, off by default. Enabling it sends document
+   # content to LangSmith's servers.
    LANGSMITH_TRACING=false
    LANGSMITH_API_KEY=your_langsmith_key_here
    LANGSMITH_ENDPOINT=https://api.smith.langchain.com
@@ -70,5 +113,19 @@ toggle should be treated as unreliable.
    streamlit run app.py
    ```
 
+## 🧰 Utilities
+`diagnose_pdf.py` compares PDF extraction backends against a single file — useful when
+extracted text looks wrong and you need to tell "bad loader" apart from "broken PDF":
+```bash
+python diagnose_pdf.py /path/to/file.pdf
+```
+
+## 🛠️ Tech Stack
+*   **Orchestration:** [LangChain](https://langchain.com) (LCEL, async API)
+*   **LLM:** OpenAI GPT-4o-mini
+*   **Vector DB:** [ChromaDB](https://trychroma.com)
+*   **Extraction:** PDFMiner, with PyMuPDF + Tesseract OCR fallback
+*   **Frontend:** [Streamlit](https://streamlit.io)
+
 ---
-Built by **Roy Insler** | [LinkedIn](www.linkedin.com/in/roy-insler-3a8042120)
+Built by **Roy Insler** | [LinkedIn](https://www.linkedin.com/in/roy-insler-3a8042120)
