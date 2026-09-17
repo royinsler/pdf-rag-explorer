@@ -36,7 +36,29 @@ and evidence of extraction damage in the window where the value should be. The
 damage evidence is what makes it specific — it is the difference between "this
 sentence has no date in it" and "this sentence lost its date."
 
-MEASURED, and it corrected the idea behind this module. Run over the whole
+MEASURED TWICE, and the second measurement is the important one.
+
+RECALL, on a second contract (test.pdf): the rule found nothing, and that is a
+failure, not a clean pass. That document has a payment date, "ביום 1.7.2026",
+which OCR deleted — and the damage evidence was right there, "סך" mangled into
+the Latin "Jo" and a bare "6" left where the date had been. The rule still said
+nothing, because it never looked: "ביום", "מיום", "ליום" and "בתאריך" occur ZERO
+times in the entire extracted document, and "החל" once. OCR destroyed the
+connectors themselves.
+
+So this check assumes the grammar survives even when the value does not. That
+held on one contract and failed on the next, and the assumption is a bad bet on
+reflection: the anchor words are short, common function words, which are
+precisely the tokens an OCR engine is most likely to misread. A rule anchored on
+vocabulary inherits the fragility of that vocabulary.
+
+Widening the connector list does not fix this — the failure is not a missing
+word, it is that no word survived. Fuzzy-matching the connectors would trade
+away the precision below for unmeasured recall. The honest fix is at extraction:
+OCR the page with a second engine and diff the outputs, where disagreement
+detects absence directly and needs no anchor at all.
+
+PRECISION, on the contract this was built from: Run over the whole
 reference contract (10,014 chars) the rule fires three times:
 
   1. "...בגין כל איחור החל מהיום העשירי לפיגור..." — with DWNT (confidence 3.0)

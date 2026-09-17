@@ -55,6 +55,14 @@ damage rather than hoping there is none.
     damage in the gap — Latin characters in Hebrew prose, a low-confidence token, a bare
     structureless number. Two signals are required; one alone flags correct Hebrew
     constantly, since `מיום שנדרש` ("from the day required") is an ordinary phrase.
+*   **What this does not catch, measured.** On a second contract the detector found
+    nothing — and that was a miss, not a pass. OCR had deleted a payment date there too,
+    leaving the same debris, but `ביום`, `מיום`, `ליום` and `בתאריך` appear *zero* times
+    in that document's extracted text: the connectors were destroyed along with the
+    values. The rule assumes the grammar survives even when the value does not, and the
+    anchor words are short function words — exactly what OCR misreads most. Widening the
+    word list does not help when no word survived, which is why the roadmap's fix is at
+    extraction rather than in this heuristic.
 *   **Bidi controls are stripped** from OCR output. `image_to_string` wraps Latin runs
     inside Hebrew lines in LRM/RLM marks — presentation hints that this app decides at
     render time anyway, and an invisible mark landing inside a date silently breaks the

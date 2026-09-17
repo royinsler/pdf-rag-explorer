@@ -47,6 +47,19 @@ for label, answer in DAMAGE_FAILURE_MODES:
         + (["provenance"] if rests_on else [])
     check(f"caught: {label}", caught_by, " + ".join(caught_by) or "NOTHING CAUGHT IT")
 
+# A KNOWN MISS, asserted so it stays visible.
+#
+# On a second contract OCR deleted a date AND destroyed the connector in front
+# of it, leaving damage evidence ("Jo" for "סך", a bare "6") with nothing to
+# anchor to. The detector found nothing. This encodes that behaviour rather than
+# hiding it: the assertion is that the miss still happens, so whoever fixes it
+# has to come here and delete this block deliberately, and nobody mistakes
+# silence on such a document for a clean bill of health.
+anchorless = "Jo לש 500,000 ש\"ח ישולם במועד מסירת החזקה בנכס לידי הקונה, 6. (להלן: התשלום האחרון)"
+check("KNOWN LIMITATION: a deletion whose connector OCR also destroyed is missed",
+      detect_damaged_values(anchorless, DAMAGED_LOW_CONFIDENCE_TERMS) == [],
+      "no surviving connector to anchor on — see damaged_values.py")
+
 # A correct answer must trip none of the three, or the warnings become noise
 # that users learn to scroll past.
 good = "המסמך אינו מציג את מועד הכניסה לשיפוץ באופן קריא; נראה כי חילוץ הטקסט פגע בו."
