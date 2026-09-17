@@ -113,6 +113,9 @@ def incinerate_document():
 # Question sets live in analysis_sets.py so scripts can import them
 # without starting Streamlit.
 from analysis_sets import ANALYSIS_QUESTION_SETS
+# The résumé path lives in its own module so it can be run without
+# launching Streamlit — see resume_analysis.py for why that matters.
+from resume_analysis import run_resume_analysis
 # Extraction pipeline lives in extraction.py so stress_inputs.py can
 # exercise the real logic without starting Streamlit.
 from extraction import (extract_document, drop_tiny_chunks, fits_in_context,
@@ -188,16 +191,6 @@ def document_caveat() -> str:
     )
 
 
-class ResumeAnalysis(BaseModel):
-    """Structured output schema for the resume path. Using a schema rather
-    than free text keeps the score a real field instead of prose to be parsed
-    — though note it's still a model estimate, not a calibrated metric."""
-    match_score: int = Field(description="0-100 estimate of how well the resume matches the job description")
-    rationale: str = Field(description="Two or three sentences explaining the score")
-    action_items: List[str] = Field(description="Three concrete, specific changes that would improve the match")
-    missing_keywords: List[str] = Field(description="Up to five skills or technologies present in the job description but absent from the resume")
-
-
 async def run_parallel_full_context(questions, doc_text, caveat=""):
     """Same fan-out, no retrieval: each question sees the whole document.
 
@@ -249,25 +242,6 @@ async def run_sequential_analysis(questions):
         result = await st.session_state.chain.ainvoke({"input": question, "chat_history": []})
         answers.append(result["answer"])
     return answers
-
-
-def run_resume_analysis(jd: str, resume_text: str) -> ResumeAnalysis:
-    """Deliberately uses NEITHER retrieval NOR parallelism.
-
-    A resume fits comfortably in a context window, so chunking it and
-    retrieving top-k actively discards information — and "which skills are
-    missing from this resume?" is unanswerable from partial text, since the
-    model can't distinguish "absent from the document" from "absent from the
-    three chunks I happened to retrieve." One call, whole document, structured
-    output. Knowing where NOT to apply the technique is the point."""
-    llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
-    structured_llm = llm.with_structured_output(ResumeAnalysis)
-    return structured_llm.invoke(
-        "You are an expert technical recruiter. Compare the candidate's complete "
-        "resume against the job description and return a structured assessment.\n\n"
-        f"=== JOB DESCRIPTION ===\n{jd}\n\n"
-        f"=== RESUME (complete text) ===\n{resume_text}"
-    )
 
 
 def _is_rtl(text: str) -> bool:
@@ -627,8 +601,8 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("👤 Developer")
-    st.markdown("[LinkedIn Profile](https://linkedin.com)")
-    st.markdown("[GitHub Repository](https://github.com)")
+    st.markdown("[GitHub Repository](https://github.com/royinsler/pdf-rag-explorer)")
+    st.markdown("[LinkedIn](https://www.linkedin.com/in/roy-insler-3a8042120)")
     st.info("Built with LangChain & OpenAI GPT-4o-mini")
 
 # --- 2. MAIN INTERFACE ---
