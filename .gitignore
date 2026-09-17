@@ -13,3 +13,6 @@ chroma_db/
 # (uploaded files can contain sensitive content, e.g. contracts/resumes)
 test.pdf
 *.debug.pdf
+
+# Interview prep — deliberately not published in a public repo
+Claude outputs/
