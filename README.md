@@ -1,9 +1,67 @@
 # ⚡ InsightStream RAG
 **High-Performance Document Intelligence & Parallel Orchestration**
 
-InsightStream RAG is a **Retrieval-Augmented Generation (RAG)** engine built around three
-problems that show up in real document work: extraction that fails silently, answers you
-can't trace back to the source, and latency on multi-part analysis.
+InsightStream RAG is a **Retrieval-Augmented Generation (RAG)** engine built around the
+problems that show up in real document work rather than in tutorials: extraction that
+fails silently, values that OCR destroys without telling you, answers you can't trace
+back to the source, and latency on multi-part analysis.
+
+**What this is:** a working demonstrator for question-answering over difficult real-world
+PDFs — scanned, right-to-left, and sometimes carrying a text layer that decodes to
+confident nonsense. Its distinguishing idea is that it *measures how badly extraction
+damaged the document* and checks every answer against that damage, instead of assuming
+the text it indexed is the text that was printed.
+
+**What this is not:** a product. It runs single-tenant and in-memory by design, has no
+authentication, no persistence and no rate limiting beyond a concurrency cap. Where a
+technique doesn't earn its place it isn't used — the résumé path deliberately skips both
+retrieval and parallelism. Its claims are backed by a benchmark and an eval you can run,
+and its limitations are written down next to them, including the ones that are still
+unfixed.
+
+## 🧭 How It Fits Together
+
+```mermaid
+flowchart TD
+    A["PDF upload"] --> B["extraction.py — PDF text layer"]
+    B --> C{"empty or garbled?"}
+    C -- no --> E["extracted text"]
+    C -- yes --> D["OCR fallback: 300 DPI raster + Tesseract<br/>per-word confidence retained"]
+    D --> E
+    E --> F["damaged_values.py<br/>find values the text promises<br/>but extraction lost or corrupted"]
+    F --> G{"fits in context?"}
+    G -- yes --> H["whole document in the prompt<br/>no chunking, no retrieval"]
+    G -- no --> I["chunk + embed into<br/>a session-scoped Chroma collection"]
+    I --> J["history-aware retrieval, top-k"]
+    H --> K["answer, with caveats naming<br/>the damaged spans by name"]
+    J --> K
+    K --> L["verification.py — three checks<br/>that need no cooperation from the model"]
+    L --> M["are the cited quotes really in the document?"]
+    L --> N["does every date and amount appear in the source?"]
+    L --> O["has it echoed OCR garbage?"]
+    L --> P["which damaged passage does this answer rest on?"]
+    M --> Q["answer + warnings"]
+    N --> Q
+    O --> Q
+    P --> Q
+```
+
+The shape worth noticing: **damage detection happens before routing, and verification
+happens after generation.** Both sit outside the model, because the failures they catch
+are ones the model cannot be prompted out of — see §4.
+
+| Module | Responsibility |
+|---|---|
+| `app.py` | Streamlit UI, session state, prompt assembly, the two answering paths |
+| `extraction.py` | Text layer → garbled-text detection → OCR fallback with per-word confidence; bidi stripping; tiny-chunk filtering; the context-size routing decision |
+| `damaged_values.py` | Finds passages promising a value that extraction lost or corrupted |
+| `verification.py` | Quote checking, date/amount checking, garbage echoes, damage provenance |
+| `resume_analysis.py` | The one path that deliberately uses neither retrieval nor parallelism |
+| `analysis_sets.py` | Per-document-type question sets for the parallel analysis |
+| `eval_rag.py`, `eval_fixtures.py` | Golden-set evaluation across indexing configurations |
+| `benchmark_parallelism.py` | Parallel-vs-sequential measurement with order-bias controls |
+| `test_*.py` | Deterministic tests; `test_damage_regression.py` replays three real failures |
+| `main.py` | A standalone CLI sanity harness, predating the extraction work — **not** the entry point and without the OCR path |
 
 ## 🚀 The Core Advantage: RAG vs. Vanilla LLM
 Modern LLMs have large context windows but remain prone to hallucination and offer no
