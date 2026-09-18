@@ -41,7 +41,7 @@ def _canon_date(text):
     """Normalise a date to (day, month, year) so formats compare equal.
 
     Written after a first version compared separator-stripped strings and
-    decided 1/7/2026 did not match 1.07.2026 - a zero-padding difference. A
+    decided 4/11/2027 did not match 4.11.2027 - a zero-padding difference. A
     check that flags CORRECT values is worse than no check, because it teaches
     the reader to dismiss the warning.
     """
@@ -52,9 +52,9 @@ def _canon_date(text):
         nums = [int(part) for part in parts]
     except ValueError:
         return None
-    if nums[0] > 31:                     # 2026-07-01
+    if nums[0] > 31:                     # 2027-11-04
         year, month, day = nums
-    else:                                # 01.07.2026
+    else:                                # 04.11.2027
         day, month, year = nums
     if year < 100:
         year += 2000
@@ -71,7 +71,7 @@ def verify_answer_facts(answer, source_text):
     number the document never stated.
 
     Observed in this project: OCR destroyed a date, leaving "החל DYN" followed
-    by the next clause's number. The model answered "6.6.2026" - assembled from
+    by the next clause's number. The model answered "8.8.2027" - assembled from
     that clause number and a year borrowed from elsewhere in the contract - and
     presented it as fact. Nothing flagged it, because the citation was real and
     only the figure inside the prose was invented.
@@ -148,7 +148,7 @@ def answer_rests_on_damage(answer, damaged_snippets, min_overlap=25):
     This is the provenance check, and it exists because presence is not
     provenance. verify_answer_facts asks "does this value appear in the
     document?" — a question that says yes when the value appears anywhere, for
-    any obligation. In the reference contract the date 15.5.2026 is printed for
+    any obligation. In the reference contract the date 3.9.2027 is printed for
     a payment; had the model guessed it for the renovation clause, the check
     would have confirmed it against text from an entirely different section.
 

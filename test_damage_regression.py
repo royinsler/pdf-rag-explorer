@@ -34,8 +34,8 @@ snippets = [d.snippet for d in damaged]
 check("the damaged clause is detected", any("DYN" in s for s in snippets),
       f"{len(damaged)} passage(s) flagged")
 # Correct clauses in the same text must stay clean, or the flag means nothing.
-check("the delivery date clause is not flagged", not any("1.07.2026" in s for s in snippets))
-check("the payment date clause is not flagged", not any("15.5.2026" in s for s in snippets))
+check("the delivery date clause is not flagged", not any("4.11.2027" in s for s in snippets))
+check("the payment date clause is not flagged", not any("3.9.2027" in s for s in snippets))
 
 print()
 for label, answer in DAMAGE_FAILURE_MODES:
@@ -55,7 +55,7 @@ for label, answer in DAMAGE_FAILURE_MODES:
 # hiding it: the assertion is that the miss still happens, so whoever fixes it
 # has to come here and delete this block deliberately, and nobody mistakes
 # silence on such a document for a clean bill of health.
-anchorless = "Jo לש 500,000 ש\"ח ישולם במועד מסירת החזקה בנכס לידי הקונה, 6. (להלן: התשלום האחרון)"
+anchorless = "Jo לש 275,000 ש\"ח ישולם במועד מסירת החזקה בנכס לידי הקונה, 6. (להלן: התשלום האחרון)"
 check("KNOWN LIMITATION: a deletion whose connector OCR also destroyed is missed",
       detect_damaged_values(anchorless, DAMAGED_LOW_CONFIDENCE_TERMS) == [],
       "no surviving connector to anchor on — see damaged_values.py")

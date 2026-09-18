@@ -19,7 +19,7 @@ OCR_LANG = "heb+eng"
 # and say so, rather than passing it downstream as if it were read cleanly.
 #
 # This exists because of a specific failure: OCR destroyed a date, leaving the
-# token "DYN" where "6.6.2026" was printed, and the model then assembled a
+# token "DYN" where "8.8.2027" was printed, and the model then assembled a
 # plausible date from a nearby clause number and presented it as fact. Tesseract
 # almost certainly scored that token poorly — but the pipeline called
 # image_to_string(), which returns text and discards confidence entirely. The

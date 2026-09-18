@@ -137,14 +137,14 @@ model, none of which need it to cooperate:
 
 *   **`verify_quotes`** — does each cited passage actually appear in the document?
 *   **`verify_answer_facts`** — does every date and amount in the answer appear in the
-    source? (Dates are compared as `(day, month, year)`, so `1/7/2026` and `1.07.2026`
+    source? (Dates are compared as `(day, month, year)`, so `4/11/2027` and `4.11.2027`
     match — a check that flags correct values is worse than no check.)
 *   **`find_ocr_garbage_echoes`** and **`answer_rests_on_damage`** — has the answer copied
     OCR gibberish, and which flagged passages does it reproduce?
 
 That last one answers **provenance**, and it is the only thing that catches the third
 failure. Presence is not provenance: `verify_answer_facts` confirms a value appears
-*somewhere*, and in this contract the date `15.5.2026` is printed for a payment — so a
+*somewhere*, and in this contract the date `3.9.2027` is printed for a payment — so a
 date guessed for a different clause would have been confirmed against real text from an
 unrelated section.
 

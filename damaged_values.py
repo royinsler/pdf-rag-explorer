@@ -6,14 +6,14 @@ OCR confidence (see extraction.ocr_confidence) scores the tokens the engine
 produced. It caught 68 damaged tokens in the reference contract at a mean
 confidence of 87.7%. It could not catch the one that mattered, for a structural
 reason rather than a tuning one: Tesseract did not misread the date
-"15.05.2026" in the renovation clause — it emitted nothing at all for it. A
+"03.09.2027" in the renovation clause — it emitted nothing at all for it. A
 deleted value produces no token, a token that does not exist has no confidence
 score, and a score that does not exist cannot fall below a threshold. No
 calibration of OCR_MIN_CONFIDENCE reaches this failure.
 
 What a deletion DOES leave is a hole in the grammar. The clause read
 
-    ... לצורך ביצוע עבודות שיפוץ בלבד החל מיום 15.05.2026
+    ... לצורך ביצוע עבודות שיפוץ בלבד החל מיום 03.09.2027
 
 and extraction produced
 
@@ -87,7 +87,7 @@ _CONNECTOR_RE = re.compile(
     "(?<![א-ת])(" + "|".join(_CONNECTORS) + ")(?![א-ת])"
 )
 
-# Any recognisable date form, including the Hebrew "12 לחודש אפריל שנת 2026"
+# Any recognisable date form, including the Hebrew "9 לחודש נובמבר שנת 2027"
 # spelled-out style that appears in contract preambles.
 _DATE_RE = re.compile(
     r"\d{1,4}[./-]\d{1,2}[./-]\d{1,4}"

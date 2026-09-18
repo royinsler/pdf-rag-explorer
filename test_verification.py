@@ -24,8 +24,8 @@ def check(name, actual, expected):
 
 
 DOC = (
-    "סך של 880,000 ש\"ח ישולם לשני יחידי המוכר עד ליום 15.5.2026 כנגד קבלת כספי המשכנתא.\n"
-    "המוכר מתחייב לפנות את הדירה ולמסור אותה לידי הקונה ביום 1.07.2026.\n"
+    "סך של 410,000 ש\"ח ישולם לשני יחידי המוכר עד ליום 3.9.2027 כנגד קבלת כספי המשכנתא.\n"
+    "המוכר מתחייב לפנות את הדירה ולמסור אותה לידי הקונה ביום 4.11.2027.\n"
     "הדירה נמכרת במצבה כמו שהוא (\"As-Is\").\n"
     "לצורך ביצוע עבדות שיפוץ בלבד החל DYN 6,. מובהר כי כניסת DPN לנכס WAN במועד האמור."
 )
@@ -43,24 +43,24 @@ check("invented quote is flagged",
 check("empty quote is not silently 'found'", verify_quotes([""], DOC), [("", False)])
 
 # --- _canon_date -----------------------------------------------------------
-# The first version compared separator-stripped strings and called 1/7/2026 a
-# mismatch for 1.07.2026 — a check that flags CORRECT values teaches the reader
+# The first version compared separator-stripped strings and called 4/11/2027 a
+# mismatch for 4.11.2027 — a check that flags CORRECT values teaches the reader
 # to dismiss every warning it raises.
-check("zero-padding does not change the date", _canon_date("1/7/2026"), _canon_date("1.07.2026"))
-check("separator does not change the date", _canon_date("15-5-2026"), _canon_date("15.5.2026"))
-check("ISO order is recognised", _canon_date("2026-07-01"), (1, 7, 2026))
-check("impossible month rejected", _canon_date("1.13.2026"), None)
+check("zero-padding does not change the date", _canon_date("4/11/2027"), _canon_date("4.11.2027"))
+check("separator does not change the date", _canon_date("3-9-2027"), _canon_date("3.9.2027"))
+check("ISO order is recognised", _canon_date("2027-11-04"), (4, 11, 2027))
+check("impossible month rejected", _canon_date("1.13.2027"), None)
 check("non-date rejected", _canon_date("not/a/date"), None)
 
 # --- verify_answer_facts ---------------------------------------------------
 check("a date present in the document passes",
-      verify_answer_facts("המסירה ביום 1.07.2026", DOC), [("1.07.2026", True)])
+      verify_answer_facts("המסירה ביום 4.11.2027", DOC), [("4.11.2027", True)])
 check("the same date written differently still passes",
-      verify_answer_facts("המסירה ביום 1/7/2026", DOC), [("1/7/2026", True)])
+      verify_answer_facts("המסירה ביום 4/11/2027", DOC), [("4/11/2027", True)])
 check("a fabricated date is flagged",
-      verify_answer_facts("הכניסה לשיפוץ ביום 6.6.2026", DOC), [("6.6.2026", False)])
+      verify_answer_facts("הכניסה לשיפוץ ביום 8.8.2027", DOC), [("8.8.2027", False)])
 check("an amount present in the document passes",
-      verify_answer_facts("סכום של 880,000 ש\"ח", DOC), [("880,000", True)])
+      verify_answer_facts("סכום של 410,000 ש\"ח", DOC), [("410,000", True)])
 check("a fabricated amount is flagged",
       verify_answer_facts("סכום של 920,000 ש\"ח", DOC), [("920,000", False)])
 check("a clean answer with no figures has nothing to check",
@@ -89,7 +89,7 @@ check("an answer reproducing a damaged passage is traced to it",
 check("an answer that declines to guess is not flagged",
       answer_rests_on_damage("המסמך אינו מציג את התאריך באופן קריא.", DAMAGED), [])
 check("an unrelated answer is not flagged",
-      answer_rests_on_damage("התמורה הכוללת עומדת על 2,980,000 ש\"ח.", DAMAGED), [])
+      answer_rests_on_damage("התמורה הכוללת עומדת על 1,450,000 ש\"ח.", DAMAGED), [])
 # A few shared words are not provenance; the overlap has to be substantial.
 check("a short incidental overlap does not count",
       answer_rests_on_damage("ביצוע עבדות", DAMAGED), [])

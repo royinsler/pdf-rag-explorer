@@ -358,20 +358,27 @@ EXTENDED_BENCHMARK_QUESTIONS = [
 
 # ---------------------------------------------------------------------------
 # A synthetic reproduction of the extraction damage observed on a real Hebrew
-# contract. Synthetic on purpose: the real document is a signed private
+# contract. Every figure, date and place name below is INVENTED. The damage
+# pattern is real and reproduced faithfully; the values are not.
+#
+# Worth stating explicitly, because it was nearly got wrong: gitignoring the
+# source PDF keeps the FILE out of the repository and does nothing about values
+# transcribed out of it into source code. Realistic fixtures written while
+# reading a private document tend to borrow that document's numbers.
+# Synthetic on purpose: the real document is a signed private
 # agreement and is gitignored, so the failure it exposed is reproduced here in
 # invented text instead of committing someone's contract to a public repo.
 #
 # The pattern being reproduced, exactly as it occurred:
-#   printed:   ... החל מיום 15.05.2026
+#   printed:   ... החל מיום 03.09.2027
 #   extracted: ... החל DYN 6,.
 # The connector survived, the preposition became Latin gibberish, and the date
 # produced no token at all. See test_damage_regression.py.
 # ---------------------------------------------------------------------------
 DAMAGED_EXTRACTION = """
-הסכם שנערך ונחתם ביום 12 לחודש אפריל שנת 2026 בין הצדדים כדלקמן.
-סך של 880,000 ש"ח ישולם למוכר עד ליום 15.5.2026 כנגד קבלת כספי המשכנתא.
-המוכר מתחייב לפנות את הנכס ולמסור אותו לידי הקונה ביום 1.07.2026.
+הסכם שנערך ונחתם ביום 9 לחודש נובמבר שנת 2027 בין הצדדים כדלקמן.
+סך של 410,000 ש"ח ישולם למוכר עד ליום 3.9.2027 כנגד קבלת כספי המשכנתא.
+המוכר מתחייב לפנות את הנכס ולמסור אותו לידי הקונה ביום 4.11.2027.
 הנכס נמכר במצבו כמו שהוא ("As-Is") בכפוף לנכונות הצהרות המוכר.
 בכל מקרה בו פיגר הקונה בתשלום ישלם תוספת של 1,000 ש"ח בגין כל איחור החל מהיום
 העשירי לפיגור ועד ליום התשלום בפועל.
@@ -386,9 +393,9 @@ DAMAGED_LOW_CONFIDENCE_TERMS = [("yt", 0.0), ("DWNT", 3.0), ("DION", 24.0), ("DP
 
 # The three answers the model actually produced for "when can the buyer enter
 # to renovate?", one per round of prompt constraint. The correct answer is
-# 15.05.2026; all three are wrong, and each is harder to spot than the last.
+# 03.09.2027; all three are wrong, and each is harder to spot than the last.
 DAMAGE_FAILURE_MODES = [
-    ("fabricated a date", "הכניסה לשיפוץ אפשרית החל מיום 6.6.2026 בהתאם להסכם."),
+    ("fabricated a date", "הכניסה לשיפוץ אפשרית החל מיום 8.8.2027 בהתאם להסכם."),
     ("passed the garbage through", "הקונים תינתן אפשרות להיכנס לנכס לצורך ביצוע עבדות שיפוץ בלבד החל DYN 6."),
     ("invented a plausible substitute",
      "הקונה רשאי להיכנס לנכס לצורך ביצוע עבדות שיפוץ בלבד החל מיום חתימת ההסכם."),
