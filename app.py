@@ -131,45 +131,12 @@ from damaged_values import detect_damaged_values, damage_caveat
 # this pattern) can't blow through the API's rate limits.
 MAX_CONCURRENT_CALLS = 5
 
-# The standing instruction about damaged extraction. Written once and shared by
-# all three answering paths (retrieval, full-context chat, full-context
-# analysis) so the three can't drift apart — they previously carried three
-# copies of the same paragraph.
-EXTRACTION_RULE = (
-    "OCR and PDF extraction sometimes destroy individual values while leaving "
-    "the surrounding sentence intact — a date may appear as stray characters. "
-    "If a value you need is garbled or missing, say the document does not show "
-    "it legibly. NEVER infer a date, amount or figure from a clause number, "
-    "from nearby values, or from context."
-)
-
-
-def _escape_braces(text: str) -> str:
-    """Make arbitrary text safe to bake into a ChatPromptTemplate.
-
-    The OCR caveat names the exact tokens Tesseract misread, and a misread
-    token can be any characters at all — including braces, which the template
-    would then try to interpret as an input variable and fail on.
-    """
-    return text.replace("{", "{{").replace("}", "}}")
-
-
-def _with_caveat(messages, caveat, human=("human", "{input}")):
-    """Place the damage caveat immediately before the question, not before the document.
-
-    Position matters more than wording here. The caveat originally sat at the
-    end of a system message that continues with ten thousand characters of
-    contract — so the instruction "never report the damaged fragment as the
-    value" was separated from the question by the entire document, and the model
-    reported the damaged fragment as the value anyway. Instructions nearest the
-    question are the ones that get followed.
-
-    An empty caveat adds no message at all, so a clean document's prompt is
-    exactly what it was before this feature existed.
-    """
-    if caveat:
-        messages = messages + [("system", caveat)]
-    return messages + [human]
+# The answering pieces (EXTRACTION_RULE, the caveat helpers, GroundedAnswer and
+# answer_from_full_document) live in answering.py so the agent graph can import
+# them without starting Streamlit. The retrieval path below still uses the same
+# EXTRACTION_RULE and _with_caveat - one copy, imported, not duplicated.
+from answering import (EXTRACTION_RULE, _escape_braces, _with_caveat,
+                       GroundedAnswer, answer_from_full_document)
 
 
 def document_caveat() -> str:
@@ -444,43 +411,6 @@ def _build_retrieval_chain(splits, k_val, doc_key, caveat=""):
     ], caveat))
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
     st.session_state.chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-
-class GroundedAnswer(BaseModel):
-    """An answer together with the exact passages it rests on.
-
-    The retrieval path gets its evidence for free — whatever was retrieved is
-    what the model saw. Full-context answering has no such by-product, so the
-    model is asked to quote what it used, and those quotes are then checked
-    against the source text (see verify_quotes). That check is something the
-    retrieval path cannot do: it can show you what was retrieved, but not
-    which part the answer actually rests on."""
-    answer: str = Field(description="The answer, written in the same language as the question")
-    quotes: List[str] = Field(description=(
-        "Up to three passages copied VERBATIM from the document that support the "
-        "answer. Copy them character for character — do not paraphrase, translate "
-        "or reformat. Empty list if the document does not answer the question."
-    ))
-
-
-def answer_from_full_document(question, doc_text, history_messages, caveat=""):
-    """Answer with the complete document in context — no retrieval."""
-    llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
-    prompt = ChatPromptTemplate.from_messages(_with_caveat([
-        ("system",
-         "You are InsightStream, an expert document consultant. The COMPLETE "
-         "document is provided below — you are seeing all of it, not an extract. "
-         "Answer only from this document. If it does not contain the answer, say "
-         "so plainly rather than inferring. " + EXTRACTION_RULE +
-         "\n\n=== DOCUMENT ===\n{document}"),
-        MessagesPlaceholder("chat_history"),
-    ], caveat))
-    chain = prompt | llm.with_structured_output(GroundedAnswer)
-    return chain.invoke({
-        "document": doc_text,
-        "chat_history": history_messages,
-        "input": question,
-    })
 
 
 def render_fact_check(checked_facts):

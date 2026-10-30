@@ -60,6 +60,11 @@ are ones the model cannot be prompted out of — see §4.
 | `analysis_sets.py` | Per-document-type question sets for the parallel analysis |
 | `eval_rag.py`, `eval_fixtures.py` | Golden-set evaluation across indexing configurations |
 | `benchmark_parallelism.py` | Parallel-vs-sequential measurement with order-bias controls |
+| `answering.py` | Full-context answering, lifted out of `app.py` so the agent can import it without Streamlit |
+| `agent_graph.py`, `agent_state.py` | The verification loop as a LangGraph graph: bounded retry, best-of, checkpointing |
+| `agent_tools.py` | Three read-only tools (search, read page, re-read a page at higher DPI) with strict schemas |
+| `agent_llm.py`, `cost_tracking.py` | The OpenAI answerer (backoff + model fallback) and per-call token/cost accounting |
+| `run_agent.py` | CLI for the agent: budget, checkpoints, resume, purge |
 | `test_*.py` | Deterministic tests; `test_damage_regression.py` replays three real failures |
 | `main.py` | A standalone CLI sanity harness, predating the extraction work — **not** the entry point and without the OCR path |
 
@@ -174,6 +179,81 @@ Data density varies by document type — a dense résumé versus a sprawling leg
     resets the session, so the data is gone when you say so rather than when the process
     restarts.
 
+## 🤖 Verification Agent (LangGraph)
+
+`verification.py` already knows when an answer is wrong. Until now that knowledge ended in
+a warning badge. The agent turns it into a **bounded retry**: the failed answer's findings
+become evidence (tools re-read the document), the model answers again, and the same checks
+run again.
+
+```mermaid
+flowchart TD
+    S([question]) --> A["answer: whole document in context"]
+    A -->|model unreachable| F
+    A --> V["verify: the four checks of §4"]
+    V -->|clean| F["finalize: best attempt, status, cost, trace"]
+    V -->|findings, and bounds allow| I["investigate: findings become tool calls become notes"]
+    I --> A
+    V -->|a bound is hit| F
+```
+
+**It stops three ways, and never silently.** `max_attempts` (default 3); a per-question
+cost budget, checked *before* paying for another attempt (default $0.05, a guard rail, not
+a target); and a no-progress rule — identical findings two attempts running means a third
+will not differ. Hitting a bound returns the *best* attempt (fewest findings, latest on a
+tie, so a retry that made things worse is not what you see) with `status="degraded"` and the
+unresolved findings listed. An answer that failed its checks is never relabelled as fine.
+
+| Status | Meaning |
+|---|---|
+| `verified` | every check passed |
+| `degraded` | best answer returned **with** unresolved findings |
+| `budget_exceeded` | stopped retrying to stay inside the budget |
+| `failed` | the model could not be reached at all (returned as a result, not a traceback) |
+
+**Tools** (`agent_tools.py`): `search_document`, `read_page`, and `reocr_page`, which
+re-reads one page from its pixels at 400 DPI instead of the pipeline's 300. All are
+read-only, have strict Pydantic schemas, and never raise: bad arguments, a missing
+Tesseract or an unmapped page come back as `ok=False`, costing the agent one piece of
+evidence rather than the run. Page numbers exist only for OCR extraction (the text layer
+arrives as one undifferentiated document), and the tools refuse rather than guess one.
+
+**State and privacy.** The document is *not* in graph state — state is what a checkpointer
+writes, and this project promises not to persist uploads. Checkpointing is opt-in
+(`--checkpoint-db`); what it writes is the per-question derivative (question, answer,
+quotes, findings, notes, cost), and `purge_thread` deletes it. A crashed run resumes from
+its last checkpoint *without calling the model again*. One thread per question, so retries
+never leak between questions; conversation history is passed in, as in the app.
+
+**Cost and latency.** Every model call reports usage through a callback; the total lives in
+state, so a resumed run continues the same bill. A model with no price entry, or a call that
+reported no usage, is flagged `cost_complete=False` — never shown as free. Each node's time
+is in the trace. The price table in `cost_tracking.py` is configuration: the one figure in
+it was read from a third-party aggregator (llmreference.com, page dated 2026-10-17), not
+from OpenAI — check it before quoting a cost.
+
+```bash
+python run_agent.py contract.pdf "מתי הפינוי?"                       # prints answer, status, cost, trace
+python run_agent.py contract.pdf "..." --budget 0.02 --attempts 2
+python run_agent.py contract.pdf "..." --checkpoint-db agent.sqlite --thread q1
+python run_agent.py contract.pdf --resume q1 --checkpoint-db agent.sqlite
+python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
+```
+
+**What this does not do, stated plainly:**
+- It has **not been run against a live model**. Every test uses a scripted answerer, so the
+  loop's *mechanics* are tested and its *value* is not yet measured: whether a retry
+  actually fixes wrong answers more often than it costs is the open question, and the eval
+  (`eval_rag.py`) is the way to answer it. No accuracy, latency or cost numbers are claimed.
+- Full-context documents only. Larger documents go through retrieval, which the agent does
+  not cover; `build_agent` refuses them with a reason.
+- The investigate step is **rule-driven** (findings map to tool calls), not a model choosing
+  tools. Cheaper and testable, less flexible. The tools are real LangChain `StructuredTool`s,
+  so a model-driven policy can replace it without touching the rest.
+- A value recovered by re-reading a page can still leave a provenance warning, because the
+  answer overlaps a passage the *first* extraction damaged. That is conservative, not wrong.
+- Not wired into the Streamlit UI yet; it runs from the CLI.
+
 ## 📊 Performance Benchmarks
 `benchmark_parallelism.py` sweeps fan-out from 2 to 10, running the *identical* question
 set both ways so exactly one variable changes. Seven reps per level, medians:
@@ -229,6 +309,9 @@ Everything except `smoke_resume.py` is deterministic and needs no API key:
 python test_verification.py        # 25 cases — quotes, dates, garbage echoes, provenance
 python test_damaged_values.py      # 10 cases — damage detection vs. correct Hebrew prose
 python test_damage_regression.py   # the three failure modes of §4, each still caught
+python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-or-nothing totals
+python test_agent_tools.py         # 35 cases — tools, schemas, refusals, a real Tesseract re-read
+python test_agent_graph.py         # 77 cases — every way the loop can fail, resume, privacy, CLI
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 
@@ -236,6 +319,12 @@ python smoke_resume.py             # one API call: exercises the résumé path
 model produced for a single clause and asserts each is still caught — the fabricated date
 by the fact check, the passed-through garbage by the echo check, and the fluent invented
 substitute by provenance alone. Remove a layer and it fails.
+
+The agent tests were themselves checked by mutation: ten deliberate breakages (drop the
+no-progress rule, drop the budget guard, leak the document into checkpointed state, report the
+wrong page, count an unpriced call as free, …) each make at least one test fail. They need
+`langgraph` and `langgraph-checkpoint-sqlite`; the re-read cases need Tesseract with `eng`
+and are skipped, loudly, without it.
 
 ## 🗺️ Roadmap
 *   **Two-engine OCR consensus.** The principled fix for the blind spot in §3: OCR a page
@@ -246,6 +335,10 @@ substitute by provenance alone. Remove a layer and it fails.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
+*   **Measure the agent.** Run the retry loop over the `eval_rag.py` fixtures against a live
+    model and report accuracy, p95 latency and cost per question with and without it. Until
+    then the loop is tested, not proven worth its cost.
+*   **Wire the agent into the UI** and extend it to the retrieval path.
 *   **Node-wise tracing:** LangSmith is wired up and **off by default** — enabling it
     sends document chunks, prompts and answers to a third party, which is a deliberate
     choice rather than a default for anyone handling real contracts.
@@ -295,7 +388,7 @@ python stress_inputs.py                      # 9 adversarial PDFs against the ex
 ```
 
 ## 🛠️ Tech Stack
-*   **Orchestration:** [LangChain](https://langchain.com) (LCEL, async API)
+*   **Orchestration:** [LangChain](https://langchain.com) (LCEL, async API); [LangGraph](https://langchain-ai.github.io/langgraph/) for the verification agent
 *   **LLM:** OpenAI GPT-4o-mini
 *   **Vector DB:** [ChromaDB](https://trychroma.com)
 *   **Extraction:** PDFMiner, with PyMuPDF + Tesseract OCR fallback
