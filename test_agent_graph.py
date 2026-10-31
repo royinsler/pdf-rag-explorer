@@ -427,13 +427,22 @@ if tesseract_ready():
         rows.close()
         check("P --purge deletes a thread's checkpoints", (code, left), (0, 0))
 
+        # Popping the variable is not enough: run_agent calls load_dotenv(), so a
+        # developer's own .env puts the key straight back - and this test then
+        # made a REAL API call on their key instead of failing as intended
+        # (found on a machine that had a .env; it passed everywhere that did
+        # not). load_dotenv is stubbed so the result cannot depend on the
+        # machine, and no test here can spend money.
+        import dotenv
         saved = os.environ.pop("OPENAI_API_KEY", None)
+        real_load_dotenv, dotenv.load_dotenv = dotenv.load_dotenv, lambda *a, **k: False
         try:
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 code = run_agent.main([path, "q"])
             check("P with no API key the CLI says so and exits 2", (code, "OPENAI_API_KEY" in err.getvalue()), (2, True))
         finally:
+            dotenv.load_dotenv = real_load_dotenv
             if saved is not None:
                 os.environ["OPENAI_API_KEY"] = saved
 else:
