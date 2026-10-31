@@ -86,6 +86,65 @@ check("re-read without the original bytes is refused",
 check("re-read of an unmapped page is refused even with bytes",
       run_tool(build_tools(DocumentContext(text="x", file_bytes=b"%PDF")), "reocr_page", page=1).ok, False)
 
+# --- re-reads are evidence, not authority -------------------------------------
+# The real case behind this rule (probe_reread.py on a real contract): the page
+# prints 4.9.27. The original extraction read it right, and so did 600 DPI, but
+# 400 DPI read it as 24.09.2027. Before the rule, that one misread joined the
+# corpus and would have passed the fact check as "present in the document".
+ORIGINAL = "Final payment on 4.9.27 as agreed, from the start."
+FROM_400 = "Final payment on 24.09.2027 as agreed, from the start."
+FROM_600 = "Final payment on 4.9.27 as agreed, from the start."
+CFG = lambda dpi: (dpi, None, None)
+from verification import verify_answer_facts, verify_quotes
+
+real = DocumentContext(text=ORIGINAL, pages={1: ORIGINAL},
+                       rereads={1: {CFG(400): FROM_400, CFG(600): FROM_600}})
+check("REAL CASE: a date only one re-read produced is not in the verification corpus",
+      "24.09.2027" in real.verification_text(), False)
+check("REAL CASE: ...so an answer stating it is flagged",
+      verify_answer_facts("Payment is due 24.09.2027", real.verification_text()), [("24.09.2027", False)])
+check("REAL CASE: ...while the correct date, from the original, still verifies",
+      verify_answer_facts("Payment is due 4.9.27".replace("4.9.27", "04.09.2027"), real.verification_text()),
+      [("04.09.2027", True)])
+check("REAL CASE: a date the original already had is not reported as recovered",
+      real.corroborated_new(1), [])
+
+agree = DocumentContext(text="Start on DYN 6.", pages={1: "Start on DYN 6."},
+                        rereads={1: {CFG(400): "Start from 11.09.2027 onward", CFG(600): "Start from 11.9.27 onward"}})
+check("two reads agreeing on a date in different notations corroborate it, once",
+      agree.corroborated_new(1), ["11.09.2027"])
+check("...and it verifies", verify_answer_facts("Starts 11.09.2027", agree.verification_text()), [("11.09.2027", True)])
+check("...but the re-read TEXT is never added: a quote found only there is still flagged",
+      verify_quotes(["Start from 11.9.27 onward"], agree.verification_text()), [("Start from 11.9.27 onward", False)])
+
+# Both re-reads agree, but the ORIGINAL page already had the values: confirmed, not recovered.
+known = DocumentContext(text="Due 11.09.2027 and 275,000.", pages={1: "Due 11.09.2027 and 275,000."},
+                        rereads={1: {CFG(400): "Due 11.9.27 and 275,000.", CFG(600): "Due 11.09.2027 and 275,000."}})
+check("values the original page already had are not reported as recovered, even when re-reads agree",
+      known.corroborated_new(1), [])
+
+disagree = DocumentContext(text="Start on DYN 6.", pages={1: "Start on DYN 6."},
+                           rereads={1: {CFG(400): "Start 11.09.2027", CFG(600): "Start 16.05.2026"}})
+check("two reads that disagree corroborate nothing", disagree.corroborated_new(1), [])
+
+two_pages = DocumentContext(text="a b", pages={1: "a", 2: "b"},
+                            rereads={1: {CFG(400): "on 11.09.2027"}, 2: {CFG(400): "on 11.09.2027"}})
+check("the same date from single reads of two DIFFERENT pages is not corroboration",
+      (two_pages.corroborated_new(1), two_pages.corroborated_new(2), "11.09.2027" in two_pages.verification_text()),
+      ([], [], False))
+
+amounts = DocumentContext(text="Pay DYN", pages={1: "Pay DYN"},
+                          rereads={1: {CFG(400): "Pay 275,000 now", CFG(600): "Pay 275,000 now"}})
+check("amounts are corroborated the same way", amounts.corroborated_new(1), ["275,000"])
+check("a page with no re-reads has nothing to corroborate", DocumentContext(text="x", pages={1: "x"}).corroborated_new(1), [])
+
+check("psm outside Tesseract's range is rejected as a result",
+      run_tool(build_tools(DocumentContext(text="x", pages={1: "x"}, file_bytes=b"%PDF")),
+               "reocr_page", page=1, psm=99).ok, False)
+check("a threshold outside 1-254 is rejected as a result",
+      run_tool(build_tools(DocumentContext(text="x", pages={1: "x"}, file_bytes=b"%PDF")),
+               "reocr_page", page=1, threshold=0).ok, False)
+
 # --- reocr_page: the real thing ---------------------------------------------
 def tesseract_ready():
     try:
@@ -111,12 +170,53 @@ if tesseract_ready():
     check("the re-read recovers the date the first extraction lost",
           "12.03.2028" in reread.data["text"], True)
     check("the re-read reports the resolution it used", reread.data["dpi"], 400)
-    check("recovered text joins the verification corpus", "12.03.2028" in rctx.verification_text(), True)
-    check("...without altering the original extraction", rctx.text, damaged_text)
+    # A single re-read is evidence, not authority: see the real-case test above.
+    check("a single re-read is NOT added to the verification corpus",
+          "12.03.2028" in rctx.verification_text(), False)
+    check("...and the original extraction is untouched", rctx.text, damaged_text)
 
     again = run_tool(rtools, "reocr_page", page=1)
     check("a repeat call is served from cache", again.data["cached"], True)
-    check("...and does not duplicate the corpus entry", len(rctx.supplement), 1)
+    check("...and is still one read, not two", len(rctx.rereads[1]), 1)
+    check("one read corroborates nothing", rctx.corroborated_new(1), [])
+
+    second = run_tool(rtools, "reocr_page", page=1, dpi=600)
+    check("a read at a different resolution is a second read", (second.ok, len(rctx.rereads[1])), (True, 2))
+    check("two reads that agree corroborate the date the original lacked",
+          rctx.corroborated_new(1), ["12.03.2028"])
+    check("...and only then does it join the verification corpus",
+          "12.03.2028" in rctx.verification_text(), True)
+
+    check("psm and threshold pass through to the OCR and are reported back",
+          (run_tool(rtools, "reocr_page", page=1, dpi=300, psm=6).data["psm"],
+           run_tool(rtools, "reocr_page", page=1, dpi=300, threshold=150).data["threshold"]), (6, 150))
+    # Returned-in-the-result is not the same as applied. Spy on what reaches Tesseract:
+    # the config string, and the image (its mode, and for a converted one its pixel values).
+    seen = []
+    import pytesseract
+    real_image_to_data = pytesseract.image_to_data
+
+    def spy(image, *args, **kwargs):
+        values = sorted({v for _, v in (image.getcolors(256) or [])}) if image.mode == "L" else None
+        seen.append((kwargs.get("config"), image.mode, values))
+        return real_image_to_data(image, *args, **kwargs)
+
+    pytesseract.image_to_data = spy
+    try:
+        spy_tools = build_tools(DocumentContext(text=damaged_text, pages={1: damaged_text},
+                                                file_bytes=pdf_bytes, ocr_lang="eng"))
+        run_tool(spy_tools, "reocr_page", page=1, dpi=300)
+        run_tool(spy_tools, "reocr_page", page=1, dpi=300, psm=11)
+        run_tool(spy_tools, "reocr_page", page=1, dpi=300, threshold=150)
+    finally:
+        pytesseract.image_to_data = real_image_to_data
+    check("with neither option the OCR is called exactly as before: no config, the colour image",
+          seen[0], ("", "RGB", None))
+    check("psm reaches Tesseract as --psm N", seen[1][0], "--psm 11")
+    check("threshold converts the image to pure black and white before the OCR sees it",
+          seen[2][1:], ("L", [0, 255]))
+    check("a black-and-white conversion still reads clean text",
+          "12.03.2028" in run_tool(rtools, "reocr_page", page=1, dpi=300, threshold=150).data["text"], True)
     check("a page past the end of the PDF is a result, not a crash",
           run_tool(build_tools(DocumentContext(text="x", pages={5: "x"}, file_bytes=pdf_bytes,
                                                ocr_lang="eng")), "reocr_page", page=5).ok, False)

@@ -221,13 +221,46 @@ if tesseract_ready():
     check("H the damaged passage triggers a re-read, and the retry succeeds",
           (report["status"], report["attempts"]), ("verified", 2))
     investigate = [t for t in report["trace"] if t["node"] == "investigate"][0]
-    check("H the re-read tool ran and worked",
-          investigate["tool_calls"], [{"tool": "reocr_page", "ok": True, "error": None}])
-    check("H the second reading reached the model", "12.03.2028" in model.calls[1]["notes"], True)
-    check("H the recovered date verifies against the re-read page", report["facts"], [("12.03.2028", True)])
+    check("H two re-reads ran, at different resolutions, and both worked",
+          investigate["tool_calls"], [{"tool": "reocr_page", "ok": True, "error": None}] * 2)
+    check("H the model is told two readings agree on the date",
+          ("Two independent re-readings" in model.calls[1]["notes"], "12.03.2028" in model.calls[1]["notes"]),
+          (True, True))
+    check("H the recovered date verifies, because two reads corroborate it", report["facts"], [("12.03.2028", True)])
     check("H the original extraction is untouched", ctx.text, damaged_text)
 else:
     skipped.append("H re-read end to end (Tesseract with 'eng' not available)")
+
+# --- H2. the misread that motivated the corroboration rule ---------------------
+# No Tesseract needed: _reocr is replaced with the readings observed on the real
+# contract. The page prints 04.09.2027; 400 DPI read it as 24.09.2027.
+import agent_tools
+
+H2_TEXT = "Payment on 04.09.2027 final DYN 6 here."
+reads = {400: "Payment on 24.09.2027 final here.", 600: "Payment on 04.09.2027 final here."}
+
+
+def fake_reocr(ctx, page, dpi=400, psm=None, threshold=None):
+    ctx.rereads.setdefault(page, {})[(dpi, psm, threshold)] = reads[dpi]
+    return {"page": page, "dpi": dpi, "psm": psm, "threshold": threshold, "mean_confidence": 80.0,
+            "low_confidence_terms": [], "text": reads[dpi], "cached": False}
+
+
+real_reocr, agent_tools._reocr = agent_tools._reocr, fake_reocr
+try:
+    ctx2 = DocumentContext(
+        text=H2_TEXT, pages={1: H2_TEXT}, file_bytes=b"%PDF",
+        damaged=[DamagedValue(connector="on", snippet=H2_TEXT, reasons=["a", "b"])])
+    model = Scripted((H2_TEXT, []), ("Payment is due 24.09.2027", []))
+    report = build_agent(ctx2, model).run("When is payment due?")
+    check("H2 the one-off misread is not accepted: the answer stating it is flagged, not verified",
+          (report["status"], report["facts"]), ("degraded", [("24.09.2027", False)]))
+    check("H2 the model was told the readings do not agree, not handed the misread",
+          ("did not give two agreeing" in model.calls[1]["notes"], "24.09.2027" in model.calls[1]["notes"]),
+          (True, False))
+    check("H2 both re-reads were made", len(ctx2.rereads[1]), 2)
+finally:
+    agent_tools._reocr = real_reocr
 
 # --- I. checkpointing: resume after a crash, and what the file holds ----------
 with tempfile.TemporaryDirectory() as tmp:

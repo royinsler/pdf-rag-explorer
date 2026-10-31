@@ -43,7 +43,7 @@ from agent_state import (MAX_ATTEMPTS, SCHEMA_VERSION, STATUS_BUDGET,
                          STATUS_DEGRADED, STATUS_FAILED, STATUS_VERIFIED,
                          AgentState)
 from agent_tools import (DocumentContext, MAX_TOOL_OUTPUT_CHARS, build_tools,
-                         excerpt_around, run_tool)
+                         run_tool)
 from cost_tracking import UsageCallback
 from verification import (answer_rests_on_damage, find_ocr_garbage_echoes,
                           verify_answer_facts, verify_quotes)
@@ -51,6 +51,9 @@ from verification import (answer_rests_on_damage, find_ocr_garbage_echoes,
 # Tool calls per investigate step. Re-OCR is the slow one; this keeps a single
 # retry from fanning out across every damaged passage in a long contract.
 MAX_TOOL_CALLS_PER_STEP = 4
+# Resolutions a damaged page is re-read at. The original extraction is 300 DPI,
+# so these are two further, different reads; a recovered value needs both.
+REREAD_DPIS = (400, 600)
 # Notes carried into a retry prompt. Older ones fall off: every note is paid for
 # again on each attempt.
 MAX_NOTES_IN_PROMPT = 8
@@ -229,7 +232,11 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
                               "quotes": state.get("quotes", []), "findings": findings}],
             "trace": [{"node": "verify", "attempt": state["attempt"],
                        "seconds": round(time.perf_counter() - started, 3),
-                       "findings": [f["kind"] for f in findings]}],
+                       "findings": [f["kind"] for f in findings],
+                       # What each finding was about, so a repeated one can be told
+                       # from a new one. The first real run showed only kinds, and
+                       # whether 'NINN' recurred across retries could not be read off.
+                       "details": [f"{f['kind']}: {_clip(f['detail'], 40)}" for f in findings]}],
         }
 
     def investigate_node(state: AgentState):
@@ -269,15 +276,23 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
                         f'"{_clip(detail, 160)}". If the question depends on a value there, '
                         "say the document does not show it legibly.")
                 page = ctx.page_containing(detail)
-                if page is not None and page not in reread_pages:
+                if (page is not None and page not in reread_pages
+                        and len(calls) + len(REREAD_DPIS) <= MAX_TOOL_CALLS_PER_STEP):
                     reread_pages.add(page)
-                    reread = call("reocr_page", page=page)
-                    connector = next((d.connector for d in ctx.damaged if d.snippet == detail), "")
-                    if reread.ok and connector:
-                        seen = excerpt_around(reread.data["text"], connector)
-                        if seen:
-                            note += (f" A second reading of page {page} at {reread.data['dpi']} DPI "
-                                     'shows, near the same point: "' + '" / "'.join(seen) + '"')
+                    # Two reads at different resolutions, and a value counts only
+                    # if BOTH produce it. One re-read is not evidence: on a real
+                    # contract the same printed date was read correctly at 300 and
+                    # 600 DPI and as a different date at 400 (see probe_reread.py).
+                    for dpi in REREAD_DPIS:
+                        call("reocr_page", page=page, dpi=dpi)
+                    recovered = ctx.corroborated_new(page)
+                    dpis = " and ".join(str(d) for d in REREAD_DPIS)
+                    if recovered:
+                        note += (f" Two independent re-readings of page {page} ({dpis} DPI) "
+                                 f"agree it also shows: {', '.join(recovered)}.")
+                    else:
+                        note += (f" Re-reading page {page} at {dpis} DPI did not give two agreeing "
+                                 "readings of any new value there, so treat the damaged value as illegible.")
                 notes.append(note)
 
         return {

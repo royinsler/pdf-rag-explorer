@@ -62,7 +62,7 @@ are ones the model cannot be prompted out of — see §4.
 | `benchmark_parallelism.py` | Parallel-vs-sequential measurement with order-bias controls |
 | `answering.py` | Full-context answering, lifted out of `app.py` so the agent can import it without Streamlit |
 | `agent_graph.py`, `agent_state.py` | The verification loop as a LangGraph graph: bounded retry, best-of, checkpointing |
-| `agent_tools.py` | Three read-only tools (search, read page, re-read a page at higher DPI) with strict schemas |
+| `agent_tools.py` | Three read-only tools (search, read page, re-read a page) with strict schemas; a re-read counts only when two reads agree |
 | `agent_llm.py`, `cost_tracking.py` | The OpenAI answerer (backoff + model fallback) and per-call token/cost accounting |
 | `run_agent.py` | CLI for the agent: budget, checkpoints, resume, purge |
 | `test_*.py` | Deterministic tests; `test_damage_regression.py` replays three real failures |
@@ -212,11 +212,23 @@ unresolved findings listed. An answer that failed its checks is never relabelled
 | `failed` | the model could not be reached at all (returned as a result, not a traceback) |
 
 **Tools** (`agent_tools.py`): `search_document`, `read_page`, and `reocr_page`, which
-re-reads one page from its pixels at 400 DPI instead of the pipeline's 300. All are
+re-reads one page from its pixels at a resolution, Tesseract page-segmentation mode (`psm`)
+or black-and-white `threshold` you choose (the pipeline's own read is 300 DPI). All are
 read-only, have strict Pydantic schemas, and never raise: bad arguments, a missing
 Tesseract or an unmapped page come back as `ok=False`, costing the agent one piece of
 evidence rather than the run. Page numbers exist only for OCR extraction (the text layer
 arrives as one undifferentiated document), and the tools refuse rather than guess one.
+
+**A re-read is evidence, not authority.** `probe_reread.py` was written to test whether
+re-reading a damaged page recovers a lost value, and its first result on a real contract page
+(one page, one file) was negative twice over: the date that had been lost stayed lost at 300,
+400 and 600 DPI, and a date that *had* been read correctly was misread at 400 DPI. An earlier
+version of the agent added every re-read to the verification corpus, which would have let that
+one misread pass the fact check as "present in the document". Now a single re-read is never
+added. The agent reads a damaged page at two further resolutions (400 and 600 DPI), and a date
+or amount joins the corpus only if **both** reads produce it and the original page lacked it.
+The re-read *text* is never added, so a quote found only there is still flagged. When the reads
+do not agree, the model is told the damaged value is illegible.
 
 **State and privacy.** The document is *not* in graph state — state is what a checkpointer
 writes, and this project promises not to persist uploads. Checkpointing is opt-in
@@ -250,8 +262,12 @@ python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
 - The investigate step is **rule-driven** (findings map to tool calls), not a model choosing
   tools. Cheaper and testable, less flexible. The tools are real LangChain `StructuredTool`s,
   so a model-driven policy can replace it without touching the rest.
-- A value recovered by re-reading a page can still leave a provenance warning, because the
-  answer overlaps a passage the *first* extraction damaged. That is conservative, not wrong.
+- Whether a re-read can ever recover a value that OCR *deleted* is **unproven**: on the one real
+  page tested it could not, at three resolutions. `probe_reread.py` with `--psm` and
+  `--threshold` tests other ways of reading the same pixels; if none works, the case for a second
+  OCR engine (see the roadmap) is the stronger one. A value a re-read does recover can still
+  leave a provenance warning, because the answer overlaps a passage the first extraction
+  damaged. That is conservative, not wrong.
 - Not wired into the Streamlit UI yet; it runs from the CLI.
 
 ## 📊 Performance Benchmarks
@@ -310,9 +326,9 @@ python test_verification.py        # 25 cases — quotes, dates, garbage echoes,
 python test_damaged_values.py      # 10 cases — damage detection vs. correct Hebrew prose
 python test_damage_regression.py   # the three failure modes of §4, each still caught
 python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-or-nothing totals
-python test_agent_tools.py         # 35 cases — tools, schemas, refusals, a real Tesseract re-read
-python test_agent_graph.py         # 77 cases — every way the loop can fail, resume, privacy, CLI
-python test_probe_reread.py         # 15 cases — the re-read experiment's report, checked against known pages
+python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
+python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
+python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 
@@ -385,7 +401,7 @@ python ocr_text_diff.py file.pdf             # image_to_string vs. rebuilt text,
 python damage_report.py file.pdf             # passages whose promised value is missing or corrupted
 python quote_probe.py "<quote>" file.pdf     # why a quote failed verification, to the character
 python chunk_report.py file.pdf              # what indexing actually produced
-python probe_reread.py file.pdf              # does a higher-DPI re-read of a damaged page recover the lost value?
+python probe_reread.py file.pdf              # does re-reading a damaged page (other DPI, --psm, --threshold) recover the lost value?
 python stress_inputs.py                      # 9 adversarial PDFs against the extraction path
 ```
 

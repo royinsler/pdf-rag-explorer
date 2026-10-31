@@ -43,6 +43,14 @@ check("no dates is an empty set", probe_reread.dates_in("clause 6, section 7"), 
 check("dates print zero-padded, so 12.03.2028 is not shown as 12.3.2028",
       probe_reread.fmt((12, 3, 2028)), "12.03.2028")
 
+check("a date to look for is parsed whatever the notation",
+      (probe_reread.parse_date("11.9.27"), probe_reread.parse_date("11/09/2027")),
+      ((11, 9, 2027), (11, 9, 2027)))
+check("something that is not a date is None", probe_reread.parse_date("tomorrow"), None)
+check("configurations are labelled with only the options in use",
+      (probe_reread.label(400), probe_reread.label(300, 6), probe_reread.label(300, 11, 150)),
+      ("400 DPI", "300 DPI, psm 6", "300 DPI, psm 11, threshold 150"))
+
 if not tesseract_ready():
     skipped.append("everything that re-reads a page (Tesseract with 'eng' not available)")
 else:
@@ -83,6 +91,34 @@ else:
     check("a date in the original but not on the page is reported as lost",
           "dates only in the original:  01.01.2030" in report, True)
 
+    # --- --expect: the question the script exists to answer ----------------------
+    lines = []
+    found = probe_reread.probe(
+        DocumentContext(text=lost, pages={1: lost}, file_bytes=pdf_bytes, ocr_lang="eng"),
+        [1], (300, 400), out=lines.append, expect=(12, 3, 2028))
+    text = "\n".join(lines)
+    check("--expect reports each configuration that found the date",
+          (found, "12.03.2028: FOUND" in text), ({1: ["300 DPI", "400 DPI"]}, True))
+    check("...and the closing line counts them", "was found by 2 configuration(s)" in text, True)
+
+    lines = []
+    found = probe_reread.probe(
+        DocumentContext(text=lost, pages={1: lost}, file_bytes=pdf_bytes, ocr_lang="eng"),
+        [1], (300,), out=lines.append, expect=(1, 1, 2031))
+    check("a date that is not on the page is reported as not found, with no configuration credited",
+          (found, "01.01.2031: not found" in "\n".join(lines)), ({1: []}, True))
+
+    # --- psm and threshold multiply the configurations ------------------------------
+    lines = []
+    probe_reread.probe(DocumentContext(text=lost, pages={1: lost}, file_bytes=pdf_bytes, ocr_lang="eng"),
+                       [1], (300,), out=lines.append, psms=(6, 11), thresholds=(None, 150))
+    text = "\n".join(lines)
+    check("every dpi x psm x threshold combination is run and labelled",
+          [lab in text for lab in ("300 DPI, psm 6:", "300 DPI, psm 6, threshold 150:",
+                                   "300 DPI, psm 11:", "300 DPI, psm 11, threshold 150:")], [True] * 4)
+    check("the report ends with what two or more configurations agree on",
+          "what the agent would accept): 12.03.2028" in text, True)
+
     # --- failures are lines in the report, not crashes ------------------------------
     report = run(DocumentContext(text="x", pages={1: "x"}, file_bytes=pdf_bytes, ocr_lang="eng"), [7])
     check("a page that does not exist is reported as a failure, not an exception",
@@ -111,6 +147,12 @@ else:
         check("with --page it probes and exits 0", (code, "=== page 1" in text), (0, True))
         check("...naming the date the original extraction held, and claiming no recovery",
       ("dates there: 12.03.2028" in text, "dates only in the re-read:   none" in text), (True, True))
+
+        code, text = cli([path, "--lang", "eng", "--force-ocr", "--page", "1", "--dpi", "300",
+                          "--expect", "12.3.28"])
+        check("--expect through the CLI finds the date and says so", (code, "FOUND" in text), (0, True))
+        code, text = cli([path, "--expect", "soon"])
+        check("an unreadable --expect exits 2 before doing any OCR", (code, "not a date" in text), (2, True))
 
         junk = os.path.join(tmp, "not.pdf")
         with open(junk, "wb") as handle:

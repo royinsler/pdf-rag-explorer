@@ -37,6 +37,26 @@ def _norm(text: str) -> str:
     return _WS.sub(" ", text).strip()
 
 
+def dates_in(text: str):
+    """The set of (day, month, year) dates written in `text`, whatever the separator or padding."""
+    from verification import _DATE_RE, _canon_date
+    return {d for d in (_canon_date(m) for m in re.findall(_DATE_RE, text)) if d}
+
+
+def fmt_date(date) -> str:
+    day, month, year = date
+    return f"{day:02d}.{month:02d}.{year}"
+
+
+def amounts_in(text: str) -> Dict[str, str]:
+    """{normalised amount: as written} for the comma-formatted amounts verification checks."""
+    from verification import _AMOUNT_RE
+    found: Dict[str, str] = {}
+    for raw in re.findall(_AMOUNT_RE, text):
+        found.setdefault(re.sub(r"[,\s]", "", raw), raw)
+    return found
+
+
 @dataclass
 class DocumentContext:
     """Everything the agent may look at, held OUTSIDE graph state.
@@ -59,10 +79,17 @@ class DocumentContext:
     # escaping for the prompt template is the answering layer's concern.
     caveat: str = ""
     ocr_lang: Optional[str] = None                          # None -> extraction.OCR_LANG
-    # Text recovered by re-reading a page. Verification may check dates and
-    # amounts against it as well as the original extraction - a value found on a
-    # second read of the document's own pixels is not an invented one.
-    supplement: List[str] = field(default_factory=list)
+    # Every re-read of a page: page -> {(dpi, psm, threshold): text}. A re-read
+    # is evidence, NOT an authority. It enters the verification corpus only
+    # through corroborated(), i.e. when at least two different reads agree.
+    #
+    # An earlier version appended every re-read to the corpus on the theory that
+    # a value found on a second read of the document's own pixels "is not an
+    # invented one". probe_reread.py on a real contract showed otherwise: the
+    # same printed date 4.9.27 was read correctly at 300 and 600 DPI and as
+    # 24.09.2027 at 400, and that single misread would have passed the fact
+    # check as "present in the document".
+    rereads: Dict[int, Dict[Any, str]] = field(default_factory=dict)
     _cache: Dict[Any, Any] = field(default_factory=dict, repr=False)
     _norm_pages: Optional[Dict[int, str]] = field(default=None, repr=False)
     _bounds: Any = field(default=None, repr=False)
@@ -94,8 +121,49 @@ class DocumentContext:
             ocr_lang=ocr_lang)
 
     def verification_text(self) -> str:
-        """What facts and quotes are checked against: the extraction plus any re-read."""
-        return self.text if not self.supplement else self.text + "\n" + "\n".join(self.supplement)
+        """What facts and quotes are checked against.
+
+        The original extraction, plus only those dates and amounts that two or
+        more different re-reads of a page agree on. The re-read TEXT is never
+        added, so a quote that exists only in a single re-read is still flagged,
+        and so is a value that only one re-read produced.
+        """
+        extra = [text for _, _, text in self._corroborated()]
+        return self.text if not extra else self.text + "\n" + "\n".join(extra)
+
+    def _corroborated(self, page=None, min_reads=2):
+        """[(kind, key, text)] for values at least `min_reads` DIFFERENT reads of one page agree on.
+
+        'Different' means a different (dpi, psm, threshold): the same
+        configuration read twice is the same read and counts once.
+        """
+        found = []
+        for number in ([page] if page is not None else sorted(self.rereads)):
+            reads = list(self.rereads.get(number, {}).values())
+            if len(reads) < min_reads:
+                continue
+            date_sets = [dates_in(t) for t in reads]
+            for date in sorted(set().union(*date_sets)):
+                if sum(date in s for s in date_sets) >= min_reads:
+                    found.append(("date", date, fmt_date(date)))
+            amount_maps = [amounts_in(t) for t in reads]
+            for key in sorted(set().union(*amount_maps)):
+                if sum(key in m for m in amount_maps) >= min_reads:
+                    raw = next(m[key] for m in amount_maps if key in m)
+                    found.append(("amount", key, raw))
+        return found
+
+    def corroborated_new(self, page: int) -> List[str]:
+        """Values two or more re-reads of `page` agree on that the ORIGINAL page did not contain.
+
+        These are the genuinely recovered ones. A value the original already had
+        is not news, and a value only one read produced is not corroborated.
+        """
+        original = self.pages.get(page, "")
+        had_dates, had_amounts = dates_in(original), set(amounts_in(original))
+        return [text for kind, key, text in self._corroborated(page)
+                if (kind == "date" and key not in had_dates)
+                or (kind == "amount" and key not in had_amounts)]
 
     def page_at(self, offset: int) -> Optional[int]:
         """1-based page holding `offset` in the whitespace-normalised document text.
@@ -157,6 +225,12 @@ class ReocrPageArgs(BaseModel):
     page: int = Field(ge=1, description="1-based PDF page number.")
     dpi: int = Field(default=REOCR_DPI, ge=200, le=600,
                      description="Resolution to rasterise at before OCR.")
+    psm: Optional[int] = Field(default=None, ge=0, le=13,
+                               description="Tesseract page-segmentation mode (6 = one block, "
+                                           "11/12 = sparse text). Default: Tesseract's own.")
+    threshold: Optional[int] = Field(default=None, ge=1, le=254,
+                                     description="Convert to black and white at this grey level "
+                                                 "before OCR. Default: no conversion.")
 
 
 # --- tool bodies -------------------------------------------------------------
@@ -212,32 +286,33 @@ def _read_page(ctx: DocumentContext, page: int, max_chars: int = 1500) -> Dict[s
             "text": text[:max_chars]}
 
 
-def _reocr(ctx: DocumentContext, page: int, dpi: int = REOCR_DPI) -> Dict[str, Any]:
+def _reocr(ctx: DocumentContext, page: int, dpi: int = REOCR_DPI,
+           psm: Optional[int] = None, threshold: Optional[int] = None) -> Dict[str, Any]:
     if ctx.file_bytes is None:
         raise ValueError("the original PDF bytes are not available, so the page cannot be re-read")
     if page not in ctx.pages:
         raise ValueError(f"page {page} has no reliable mapping to the PDF "
                          "(only OCR extraction records page numbers)")
-    key = ("reocr", page, dpi)
+    config = (dpi, psm, threshold)
+    key = ("reocr", page, config)
     if key in ctx._cache:                       # OCR is the expensive call; never repeat it
         return {**ctx._cache[key], "cached": True}
 
     from extraction import ocr_extract_documents, OCR_LANG   # lazy: pulls in PyMuPDF/Tesseract
     docs = ocr_extract_documents(ctx.file_bytes, lang=ctx.ocr_lang or OCR_LANG,
-                                 dpi=dpi, only_pages=[page - 1])
+                                 dpi=dpi, only_pages=[page - 1], psm=psm, threshold=threshold)
     if not docs:
         raise ValueError("the re-read recognised no text on that page")
     doc = docs[0]
     result = {
-        "page": page, "dpi": dpi,
+        "page": page, "dpi": dpi, "psm": psm, "threshold": threshold,
         "mean_confidence": doc.metadata.get("ocr_confidence"),
         "low_confidence_terms": [t for t, _ in doc.metadata.get("low_confidence_terms", [])][:10],
         "text": doc.page_content,
         "cached": False,
     }
     ctx._cache[key] = result
-    if doc.page_content not in ctx.supplement:
-        ctx.supplement.append(doc.page_content)
+    ctx.rereads.setdefault(page, {})[config] = doc.page_content
     return result
 
 
