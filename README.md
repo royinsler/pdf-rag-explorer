@@ -312,6 +312,7 @@ python test_damage_regression.py   # the three failure modes of §4, each still 
 python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-or-nothing totals
 python test_agent_tools.py         # 35 cases — tools, schemas, refusals, a real Tesseract re-read
 python test_agent_graph.py         # 77 cases — every way the loop can fail, resume, privacy, CLI
+python test_probe_reread.py         # 15 cases — the re-read experiment's report, checked against known pages
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 
@@ -384,6 +385,7 @@ python ocr_text_diff.py file.pdf             # image_to_string vs. rebuilt text,
 python damage_report.py file.pdf             # passages whose promised value is missing or corrupted
 python quote_probe.py "<quote>" file.pdf     # why a quote failed verification, to the character
 python chunk_report.py file.pdf              # what indexing actually produced
+python probe_reread.py file.pdf              # does a higher-DPI re-read of a damaged page recover the lost value?
 python stress_inputs.py                      # 9 adversarial PDFs against the extraction path
 ```
 
