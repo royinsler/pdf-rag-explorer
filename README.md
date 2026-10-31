@@ -329,6 +329,7 @@ python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-o
 python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
 python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
+python test_eval_agent.py           # 24 cases — the agent eval's scoring and comparison, on scripted answers
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 
@@ -352,9 +353,10 @@ and are skipped, loudly, without it.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
-*   **Measure the agent.** Run the retry loop over the `eval_rag.py` fixtures against a live
-    model and report accuracy, p95 latency and cost per question with and without it. Until
-    then the loop is tested, not proven worth its cost.
+*   **Measure the agent.** `eval_agent.py` is the harness: one attempt vs. the loop, same
+    questions, correctness, cost and latency per question. It is written and tested on a
+    scripted model; it has **not been run against a live model yet**, so until it is the loop
+    is tested, not proven worth its cost. It also cannot test re-reading, which needs a real PDF.
 *   **Wire the agent into the UI** and extend it to the retrieval path.
 *   **Node-wise tracing:** LangSmith is wired up and **off by default** — enabling it
     sends document chunks, prompts and answers to a third party, which is a deliberate
@@ -401,6 +403,7 @@ python ocr_text_diff.py file.pdf             # image_to_string vs. rebuilt text,
 python damage_report.py file.pdf             # passages whose promised value is missing or corrupted
 python quote_probe.py "<quote>" file.pdf     # why a quote failed verification, to the character
 python chunk_report.py file.pdf              # what indexing actually produced
+python eval_agent.py                         # does the retry loop beat one attempt? needs OPENAI_API_KEY, costs cents
 python probe_reread.py file.pdf              # does re-reading a damaged page (other DPI, --psm, --threshold) recover the lost value?
 python stress_inputs.py                      # 9 adversarial PDFs against the extraction path
 ```
