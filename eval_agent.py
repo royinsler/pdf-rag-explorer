@@ -16,9 +16,14 @@ Two suites, both on SYNTHETIC text (nothing private is read or sent):
   clean     the 17 golden questions on the synthetic contract. Nothing is damaged,
             so the loop should almost never fire. This measures what it COSTS when
             it is not needed, and that it never makes a correct answer worse.
-  damaged   the reproduced extraction failure (eval_fixtures.DAMAGED_EXTRACTION):
-            one question whose answer was destroyed, plus three whose answers are
-            intact. This is where the loop is supposed to pay.
+  damaged   six invented documents reproducing the extraction failure
+            (eval_fixtures.DAMAGED_EXTRACTION and DAMAGED_CASES), each with a
+            different date connector: five questions whose answers were destroyed,
+            one whose answer is intact despite damage nearby ("relational" - saying
+            "unreadable" there would be a failure), and a control per document.
+            This is where the loop is supposed to pay.
+            The model runs at temperature 0, so --repeats adds almost nothing: more
+            DIFFERENT questions is what widens the sample.
 
 SCORING IS INDEPENDENT OF THE LOOP'S OWN CHECKS. The loop stops when
 verification.py finds nothing; scoring an answer with the same checks would be
@@ -43,7 +48,7 @@ not as "re-read the page". Re-reading is a separate question
 (probe_reread.py) and needs a real file.
 
 Needs OPENAI_API_KEY (environment or .env). Cost: a few cents - roughly
-(21 questions) x (1 + up to 3 attempts) x repeats gpt-4o-mini calls. `main` takes
+(about 40 questions) x (1 + up to 3 attempts) x repeats gpt-4o-mini calls. `main` takes
 an injectable answerer so the harness itself is tested with no key.
 """
 import argparse
@@ -57,7 +62,7 @@ from agent_graph import build_agent
 from agent_state import MAX_ATTEMPTS
 from agent_tools import DocumentContext, dates_in
 from damaged_values import damage_caveat, detect_damaged_values
-from eval_fixtures import (DAMAGED_EXTRACTION, DAMAGED_LOW_CONFIDENCE_TERMS,
+from eval_fixtures import (DAMAGED_CASES, DAMAGED_EXTRACTION, DAMAGED_LOW_CONFIDENCE_TERMS,
                            GOLDEN_SET, SYNTHETIC_CONTRACT)
 from verification import _canon_date
 
@@ -92,7 +97,8 @@ def contains_value(answer, expect):
 
 
 def score_expected(answer, case):
-    return "pass" if contains_value(answer, case["expect"]) else "fail"
+    wanted = case.get("expect_any") or [case["expect"]]
+    return "pass" if any(contains_value(answer, value) for value in wanted) else "fail"
 
 
 def score_damaged(answer, case=None):
@@ -120,12 +126,18 @@ def scorer_for(case):
     return score_damaged if case.get("kind") == "damaged" else score_expected
 
 
+def _damaged_group(text, low_confidence, cases):
+    damaged = detect_damaged_values(text, low_confidence)
+    return (DocumentContext(text=text, damaged=list(damaged), caveat=damage_caveat(damaged)), cases)
+
+
 def build_suites():
-    clean_ctx = DocumentContext(text=SYNTHETIC_CONTRACT)
-    damaged = detect_damaged_values(DAMAGED_EXTRACTION, DAMAGED_LOW_CONFIDENCE_TERMS)
-    damaged_ctx = DocumentContext(text=DAMAGED_EXTRACTION, damaged=list(damaged),
-                                  caveat=damage_caveat(damaged))
-    return {"clean": (clean_ctx, GOLDEN_SET), "damaged": (damaged_ctx, DAMAGED_QUESTIONS)}
+    """{suite: [(context, cases), ...]} - a suite can span several documents."""
+    return {
+        "clean": [(DocumentContext(text=SYNTHETIC_CONTRACT), GOLDEN_SET)],
+        "damaged": [_damaged_group(DAMAGED_EXTRACTION, DAMAGED_LOW_CONFIDENCE_TERMS, DAMAGED_QUESTIONS)]
+                   + [_damaged_group(c["text"], c["low_confidence"], c["questions"]) for c in DAMAGED_CASES],
+    }
 
 
 def run_case(agent, case):
@@ -146,22 +158,26 @@ def evaluate(answerer, suites, attempts=MAX_ATTEMPTS, budget=0.05, repeats=1, se
     """
     rng = random.Random(seed)
     results = {}
-    for name, (ctx, cases) in suites.items():
-        arms = {"baseline": build_agent(ctx, answerer, budget_usd=budget, max_attempts=1),
-                "loop": build_agent(ctx, answerer, budget_usd=budget, max_attempts=attempts)}
+    for name, groups in suites.items():
         rows = []
-        for index, case in enumerate(cases):
-            for repeat in range(repeats):
-                order = list(arms)
-                rng.shuffle(order)
-                row = {"suite": name, "question": case["question"], "kind": case.get("kind", "golden"),
-                       "repeat": repeat}
-                for arm in order:
-                    row[arm] = run_case(arms[arm], case)
-                rows.append(row)
-                log(f"  [{name} {index + 1}/{len(cases)}.{repeat + 1}] "
-                    f"baseline={row['baseline']['outcome']} loop={row['loop']['outcome']} "
-                    f"(attempts {row['loop']['attempts']})")
+        total = sum(len(cases) for _, cases in groups)
+        done = 0
+        for ctx, cases in groups:
+            arms = {"baseline": build_agent(ctx, answerer, budget_usd=budget, max_attempts=1),
+                    "loop": build_agent(ctx, answerer, budget_usd=budget, max_attempts=attempts)}
+            for case in cases:
+                done += 1
+                for repeat in range(repeats):
+                    order = list(arms)
+                    rng.shuffle(order)
+                    row = {"suite": name, "question": case["question"],
+                           "kind": case.get("kind", "golden"), "repeat": repeat}
+                    for arm in order:
+                        row[arm] = run_case(arms[arm], case)
+                    rows.append(row)
+                    log(f"  [{name} {done}/{total}.{repeat + 1}] "
+                        f"baseline={row['baseline']['outcome']} loop={row['loop']['outcome']} "
+                        f"(attempts {row['loop']['attempts']})")
         results[name] = rows
     return results
 
@@ -189,6 +205,14 @@ def summarize(results, out=print):
                 f" (${cost / len(runs):.5f}/q)   latency {latency:.1f}s/q   "
                 f"retried {fired}{f'   UNCLEAR {unclear} (read these)' if unclear else ''}   statuses {statuses}")
 
+        for kind in sorted({row["kind"] for row in rows}):
+            if kind == "golden":
+                continue
+            group = [row for row in rows if row["kind"] == kind]
+            counts = {arm: {o: sum(1 for r in group if r[arm]["outcome"] == o)
+                            for o in sorted({r[arm]["outcome"] for r in group})}
+                      for arm in ("baseline", "loop")}
+            out(f"  {kind:<10} baseline {counts['baseline']}   loop {counts['loop']}")
         improved = [row for row in rows if row["baseline"]["outcome"] not in GOOD
                     and row["loop"]["outcome"] in GOOD]
         regressed = [row for row in rows if row["baseline"]["outcome"] in GOOD
@@ -201,8 +225,8 @@ def summarize(results, out=print):
                     f"      baseline: {row['baseline']['answer'][:160]!r}\n"
                     f"      loop:     {row['loop']['answer'][:160]!r}")
         for row in rows:
-            if row["kind"] == "damaged":
-                out(f"    damaged question, run {row['repeat'] + 1}:\n"
+            if row["kind"] in ("damaged", "relational"):
+                out(f"    {row['kind']} question, run {row['repeat'] + 1}:\n"
                     f"      baseline [{row['baseline']['outcome']}]: {row['baseline']['answer'][:200]!r}\n"
                     f"      loop     [{row['loop']['outcome']}]: {row['loop']['answer'][:200]!r}  "
                     f"({row['loop']['status']}, {row['loop']['attempts']} attempts)")
@@ -233,7 +257,7 @@ def main(argv=None, answerer=None, out=print):
     suites = build_suites()
     if args.suite != "all":
         suites = {args.suite: suites[args.suite]}
-    questions = sum(len(cases) for _, cases in suites.values()) * args.repeats
+    questions = sum(len(cases) for groups in suites.values() for _, cases in groups) * args.repeats
     out(f"{questions} questions x 2 arms; at most {questions * (1 + args.attempts)} model calls.")
 
     results = evaluate(answerer, suites, attempts=args.attempts, budget=args.budget,

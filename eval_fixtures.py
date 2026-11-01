@@ -400,3 +400,87 @@ DAMAGE_FAILURE_MODES = [
     ("invented a plausible substitute",
      "הקונה רשאי להיכנס לנכס לצורך ביצוע עבדות שיפוץ בלבד החל מיום חתימת ההסכם."),
 ]
+
+
+# ---------------------------------------------------------------------------
+# More damaged documents, for eval_agent.py. Every name, date and figure is
+# INVENTED. Each reproduces the observed pattern (see DAMAGED_EXTRACTION): the
+# connector survives, the preposition becomes Latin debris, the date becomes a
+# stray number. They differ in the connector and the wording, so a result does
+# not rest on one phrase. The last is the opposite case: damage in the window
+# but NOTHING deleted, where the right answer is the intact relational one and
+# "unreadable" would be a failure.
+#
+# Each case: text, the low-confidence terms Tesseract would report, and
+# questions. "damaged" questions have no answer in the text; "control" ones do.
+# ---------------------------------------------------------------------------
+DAMAGED_CASES = [
+    {
+        "id": "meyom",
+        "text": """
+הסכם לשכירת מחסן בין החברה המשכירה לבין השוכרת, שנחתם בתל אביב.
+דמי השכירות החודשיים הם 8,200 ש"ח, וישולמו עד היום החמישי בכל חודש.
+השוכרת תהיה רשאית לפנות את הציוד מהמחסן מיום DYN 8,. הפינוי ייעשה על חשבונה.
+""",
+        "low_confidence": [("DYN", 82.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "מאיזה תאריך השוכרת רשאית לפנות את הציוד מהמחסן?", "kind": "damaged"},
+            {"question": "מהם דמי השכירות החודשיים?", "expect": "8,200", "kind": "control"},
+        ],
+    },
+    {
+        "id": "ad_leyom",
+        "text": """
+הסכם למתן שירותי תכנון בין המזמין לבין המתכנן.
+שכר הטרחה הכולל הוא 96,000 ש"ח ללא מע"מ ויחולק לשלושה תשלומים שווים.
+המתכנן ימסור למזמין את התוכניות הסופיות עד ליום SWN 3. איחור יזכה את המזמין בפיצוי.
+""",
+        "low_confidence": [("SWN", 79.0), ("DION", 24.0)],
+        "questions": [
+            {"question": "עד איזה תאריך על המתכנן למסור את התוכניות הסופיות?", "kind": "damaged"},
+            {"question": "מהו שכר הטרחה הכולל?", "expect": "96,000", "kind": "control"},
+        ],
+    },
+    {
+        "id": "beyom",
+        "text": """
+הסכם מכר של דירה בין המוכרים לבין הקונה.
+התמורה בסך 1,350,000 ש"ח תשולם בשתי פעימות, כמפורט בנספח א'.
+הבדיקה הסופית של הנכס תתקיים ביום WT 2. הקונה רשאי להביא מומחה מטעמו.
+""",
+        "low_confidence": [("WT", 85.0), ("DWNT", 3.0)],
+        "questions": [
+            {"question": "באיזה תאריך תתקיים הבדיקה הסופית של הנכס?", "kind": "damaged"},
+            {"question": "מהי התמורה עבור הדירה?", "expect": "1,350,000", "kind": "control"},
+        ],
+    },
+    {
+        "id": "betaarich",
+        "text": """
+הסכם ביטוח בין חברת הביטוח לבין המבוטח בגין ציוד משרדי.
+הפרמיה השנתית היא 4,700 ש"ח, והכיסוי מוגבל לסכום של 250,000 ש"ח לכל אירוע.
+נספח הביטוח הסופי ייחתם בתאריך tN 9, בנוכחות שני הצדדים.
+""",
+        "low_confidence": [("tN", 81.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "באיזה תאריך ייחתם נספח הביטוח הסופי?", "kind": "damaged"},
+            {"question": "מהי הפרמיה השנתית?", "expect": "4,700", "kind": "control"},
+        ],
+    },
+    {
+        # Damage in the window, nothing deleted: "from the fifteenth day" is
+        # relational and was never a date. The correct answer is in the text.
+        "id": "relational",
+        "text": """
+הסכם אספקה בין הספק לבין הלקוח.
+על איחור בתשלום תתווסף ריבית בשיעור של 0.5% לכל חודש.
+בגין כל איחור במסירה ישלם הספק פיצוי של 750 ש"ח, החל מהיום החמישה עשר DWNT לאיחור ועד למסירה בפועל.
+""",
+        "low_confidence": [("DWNT", 3.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "החל מאיזה יום לאיחור מתחיל הפיצוי על איחור במסירה?",
+             "expect_any": ["החמישה עשר", "15"], "kind": "relational"},
+            {"question": "מהו סכום הפיצוי על איחור במסירה?", "expect": "750", "kind": "control"},
+        ],
+    },
+]

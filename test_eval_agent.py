@@ -31,6 +31,10 @@ check("a date matches whatever its notation",
        eval_agent.contains_value("by 3/9/27", "3.9.2027")), (True, True))
 check("a different date does not match", eval_agent.contains_value("ישולם עד 03.09.2028", "3.9.2027"), False)
 check("an answer without the value fails", eval_agent.score_expected("I don't know", {"expect": "60"}), "fail")
+check("any of several accepted phrasings passes",
+      (eval_agent.score_expected("מהיום ה-15", {"expect_any": ["החמישה עשר", "15"]}),
+       eval_agent.score_expected("מהיום החמישה עשר", {"expect_any": ["החמישה עשר", "15"]}),
+       eval_agent.score_expected("לא ידוע", {"expect_any": ["החמישה עשר", "15"]})), ("pass", "pass", "fail"))
 
 # --- the damaged question: the true value is not in the text ----------------------
 check("an honest 'unreadable' is the best available answer",
@@ -48,46 +52,65 @@ check("an answer that invents nothing but does not say 'unreadable' is unclear, 
 check("an empty answer is wrong", eval_agent.score_damaged(""), "wrong")
 
 # --- the harness end to end on a scripted model -----------------------------------
-QUESTIONS = {c["question"]: c for c in eval_agent.GOLDEN_SET + eval_agent.DAMAGED_QUESTIONS if "expect" in c}
-calls = []
+ALL_CASES = list(eval_agent.GOLDEN_SET) + list(eval_agent.DAMAGED_QUESTIONS) + [
+    q for c in eval_agent.DAMAGED_CASES for q in c["questions"]]
+QUESTIONS = {c["question"]: c for c in ALL_CASES}
+
+
+def correct(case):
+    return (case.get("expect_any") or [case["expect"]])[0]
 
 
 def answerer(question, doc_text, history, caveat, notes, config):
-    calls.append((question, bool(notes)))
-    if "שיפוץ" in question:       # fabricates until it is given notes, then admits it
+    case = QUESTIONS[question]
+    if case.get("kind") == "damaged":       # fabricates until it is given notes, then admits it
         return GroundedAnswer(answer="הכניסה אפשרית ביום 8.8.2027" if not notes else "הערך לא קריא", quotes=[])
-    return GroundedAnswer(answer=f"The answer is {QUESTIONS[question]['expect']}.", quotes=[])
+    return GroundedAnswer(answer=f"The answer is {correct(case)}.", quotes=[])
 
 
 lines = []
 code = eval_agent.main(["--suite", "damaged", "--repeats", "2"], answerer=answerer, out=lines.append)
 text = "\n".join(lines)
 check("it runs and exits 0", code, 0)
-check("it states the most it could spend before running", "at most 32 model calls" in text, True)
+N_DAMAGED = len(eval_agent.DAMAGED_QUESTIONS) + sum(len(c["questions"]) for c in eval_agent.DAMAGED_CASES)
+check("it states the most it could spend before running",
+      f"at most {N_DAMAGED * 2 * 4} model calls" in text, True)
+check("the damaged suite spans six documents, one per connector plus the relational case",
+      (len(eval_agent.build_suites()["damaged"]), len(eval_agent.DAMAGED_CASES)), (6, 5))
+check("every damaged document is actually detected as damaged",
+      all(ctx.damaged for ctx, _ in eval_agent.build_suites()["damaged"]), True)
 
 suites = {"damaged": eval_agent.build_suites()["damaged"]}
 rows = eval_agent.evaluate(answerer, suites, repeats=1, log=lambda *_: None)["damaged"]
-by_kind = {row["kind"]: row for row in rows if row["kind"] == "damaged"}
-check("baseline fabricates and is scored wrong", by_kind["damaged"]["baseline"]["outcome"], "wrong")
-check("the loop, given notes, admits it and is scored honest", by_kind["damaged"]["loop"]["outcome"], "honest")
-check("the loop used a second attempt only where it was needed",
-      sorted(row["loop"]["attempts"] for row in rows), [1, 1, 1, 2])
+damaged_rows = [row for row in rows if row["kind"] == "damaged"]
+check("baseline fabricates on every damaged question and is scored wrong",
+      {row["baseline"]["outcome"] for row in damaged_rows}, {"wrong"})
+check("the loop, given notes, admits it and is scored honest",
+      {row["loop"]["outcome"] for row in damaged_rows}, {"honest"})
+check("the loop used a second attempt only on the damaged questions",
+      sorted((row["kind"], row["loop"]["attempts"]) for row in rows if row["loop"]["attempts"] > 1),
+      [("damaged", 2)] * len(damaged_rows))
+check("the relational question is answered correctly by both arms, with no retry",
+      {(row["baseline"]["outcome"], row["loop"]["outcome"], row["loop"]["attempts"])
+       for row in rows if row["kind"] == "relational"}, {("pass", "pass", 1)})
 check("baseline is one attempt, always", {row["baseline"]["attempts"] for row in rows}, {1})
 
 summary = eval_agent.summarize({"damaged": rows}, out=lambda *_: None)["damaged"]
 check("the summary counts what the loop fixed and what it broke",
-      (summary["improved"], summary["regressed"]), (1, 0))
-check("good counts match: baseline 3 of 4, loop 4 of 4",
+      (summary["improved"], summary["regressed"]), (len(damaged_rows), 0))
+check("good counts match: baseline fails only the damaged questions, the loop none",
       ((summary["baseline"]["good"], summary["baseline"]["n"]),
-       (summary["loop"]["good"], summary["loop"]["n"])), ((3, 4), (4, 4)))
+       (summary["loop"]["good"], summary["loop"]["n"])),
+      ((len(rows) - len(damaged_rows), len(rows)), (len(rows), len(rows))))
 
 # a loop that makes a correct answer worse must be reported as BROKE, not hidden
 def regressing(question, doc_text, history, caveat, notes, config):
-    if "שיפוץ" in question:
+    case = QUESTIONS[question]
+    if case.get("kind") == "damaged":
         return GroundedAnswer(answer="הערך לא קריא", quotes=[])
     if notes:                       # only ever reached if verification objected
         return GroundedAnswer(answer="unknown", quotes=[])
-    return GroundedAnswer(answer=f"The answer is {QUESTIONS[question]['expect']}.", quotes=[])
+    return GroundedAnswer(answer=f"The answer is {correct(case)}.", quotes=[])
 
 
 clean_rows = eval_agent.evaluate(regressing, {"clean": eval_agent.build_suites()["clean"]},
