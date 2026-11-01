@@ -253,10 +253,18 @@ python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
 ```
 
 **What this does not do, stated plainly:**
-- It has **not been run against a live model**. Every test uses a scripted answerer, so the
-  loop's *mechanics* are tested and its *value* is not yet measured: whether a retry
-  actually fixes wrong answers more often than it costs is the open question, and the eval
-  (`eval_rag.py`) is the way to answer it. No accuracy, latency or cost numbers are claimed.
+- Its value is **only barely measured**. The tests use a scripted answerer, so the loop's
+  *mechanics* are proven; `eval_agent.py` then ran it once against gpt-4o-mini, one attempt vs.
+  the loop. On the 17 clean-contract questions (3 runs each, temperature 0, so effectively 17)
+  both arms answered all correctly and the loop added about 2.5% cost ($0.00039 → $0.00040 per
+  question). On the one damaged-clause question the single attempt copied the OCR debris
+  (`DYN 6`) into its answer and the loop did not; it said instead that the document does not show
+  the date legibly, clumsily and with an English word in a Hebrew sentence. That cost about 22%
+  more ($0.00015 → $0.00018) and 0.2s. **That is one question.** It shows the loop can change
+  that failure; it does not show a rate. One clean-text answer was flagged `degraded` for a
+  percentage the model *computed* (not printed in the contract); the cause is unconfirmed, but if
+  the fact check treats derived figures as unsupported it will raise false alarms on correct
+  calculations.
 - Full-context documents only. Larger documents go through retrieval, which the agent does
   not cover; `build_agent` refuses them with a reason.
 - The investigate step is **rule-driven** (findings map to tool calls), not a model choosing
@@ -353,10 +361,13 @@ and are skipped, loudly, without it.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
-*   **Measure the agent.** `eval_agent.py` is the harness: one attempt vs. the loop, same
-    questions, correctness, cost and latency per question. It is written and tested on a
-    scripted model; it has **not been run against a live model yet**, so until it is the loop
-    is tested, not proven worth its cost. It also cannot test re-reading, which needs a real PDF.
+*   **Measure the agent properly.** `eval_agent.py` exists and has had one live run (see "What
+    this does not do"); that run had a single damaged question. The next step is more damaged
+    cases, covering more than one failure mode, and a sampling temperature above 0 so repeats
+    carry information. It also cannot test re-reading, which needs a real PDF.
+*   **Derived figures in the fact check.** Decide whether a computed value (a percentage worked
+    out from printed figures) should count as supported, after reading what the loop did with
+    the one answer that tripped it.
 *   **Wire the agent into the UI** and extend it to the retrieval path.
 *   **Node-wise tracing:** LangSmith is wired up and **off by default** — enabling it
     sends document chunks, prompts and answers to a third party, which is a deliberate
