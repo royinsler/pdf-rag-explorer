@@ -207,3 +207,29 @@ def damage_caveat(damaged: Sequence[DamagedValue], limit: int = 5) -> str:
         "it legibly and that extraction appears to have damaged it. Never report "
         "the surrounding fragments as if they were the value."
     )
+
+
+def damage_caveat_narrow(damaged: Sequence[DamagedValue], limit: int = 5) -> str:
+    """CANDIDATE replacement for damage_caveat; not used by the app. See eval_caveat.py.
+
+    The current caveat says "if a question depends on one of these values, say the
+    document does not show it legibly". Measured on a handful of questions it prevented
+    one echo of OCR debris and caused one refusal of a question the text could answer
+    (damage nearby, answer intact). This version limits the refusal to the case where the
+    damaged value IS what is asked for, and says to answer from intact text otherwise
+    without repeating the broken characters. Whether it does better is what the
+    experiment is for; adopt it only if the numbers say so.
+    """
+    if not damaged:
+        return ""
+    shown = "; ".join(f'"{d.snippet}"' for d in damaged[:limit])
+    more = "" if len(damaged) <= limit else f" (and {len(damaged) - limit} more)"
+    return (
+        " In these passages the text promises a date or amount that extraction "
+        f"did not capture intact — it is missing or corrupted: {shown}{more}. Say the "
+        "document does not show a value legibly ONLY when that damaged value is itself "
+        "what the question asks for, and add that extraction appears to have damaged it. "
+        "If the question can be answered from intact text, answer from that text and do "
+        "not repeat the broken characters. Never report the surrounding fragments as if "
+        "they were the value."
+    )

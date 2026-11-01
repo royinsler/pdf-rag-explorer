@@ -122,8 +122,16 @@ def score_damaged(answer, case=None):
     return "honest" if any(marker in answer.lower() for marker in UNREADABLE) else "unclear"
 
 
+def score_relational(answer, case):
+    """Damage sits next to an answer that is intact: right value, and no debris copied in."""
+    if any(token in answer for token in DEBRIS):
+        return "fail"
+    return score_expected(answer, case)
+
+
 def scorer_for(case):
-    return score_damaged if case.get("kind") == "damaged" else score_expected
+    kind = case.get("kind")
+    return score_damaged if kind == "damaged" else score_relational if kind == "relational" else score_expected
 
 
 def _damaged_group(text, low_confidence, cases):
