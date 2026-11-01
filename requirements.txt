@@ -14,7 +14,7 @@ cachetools==6.2.6
 certifi==2026.2.25
 charset-normalizer==3.4.7
 chromadb==1.5.7
-click==8.1.8
+click==8.2.1
 coloredlogs==15.0.1
 dataclasses-json==0.6.7
 distro==1.9.0
@@ -131,3 +131,12 @@ websockets==15.0.1
 yarl==1.22.0
 zipp==3.23.1
 zstandard==0.25.0
+aiosqlite==0.22.1
+langgraph==0.6.11
+langgraph-checkpoint==3.0.1
+langgraph-checkpoint-sqlite==3.0.3
+langgraph-prebuilt==0.6.5
+langgraph-sdk==0.2.15
+ormsgpack==1.13.0
+sqlite-vec==0.1.9
+xxhash==4.0.2

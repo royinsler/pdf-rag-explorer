@@ -98,7 +98,9 @@ def strip_bidi(text: str) -> str:
 
 
 def ocr_extract_documents(file_bytes: bytes, lang: str = OCR_LANG,
-                          min_confidence: float = OCR_MIN_CONFIDENCE):
+                          min_confidence: float = OCR_MIN_CONFIDENCE,
+                          dpi: int = 300, only_pages=None,
+                          psm=None, threshold=None):
     """Fallback extraction for PDFs whose text layer is missing or corrupted.
 
     Rasterizes each page with PyMuPDF and reads it with Tesseract, bypassing the
@@ -109,6 +111,15 @@ def ocr_extract_documents(file_bytes: bytes, lang: str = OCR_LANG,
     survives. Words scoring below min_confidence are recorded in metadata as
     unreliable; the text itself is left unmarked, so embeddings and display are
     not polluted by annotation.
+
+    `dpi` and `only_pages` (0-based page numbers) exist for the agent's re-read
+    tool: the same pipeline, pointed at one suspect page at a higher resolution.
+    The defaults reproduce the original behaviour exactly - every page, 300 DPI.
+
+    `psm` (Tesseract page-segmentation mode, e.g. 6 or 11) and `threshold`
+    (convert to black and white at this grey level, 1-254) exist for
+    probe_reread.py, which tests whether a different way of reading the same
+    pixels recovers a value a plain re-read does not. Both default to off.
 
     Requires the `tesseract` binary (macOS: `brew install tesseract
     tesseract-lang`) plus `pymupdf` and `pytesseract`.
@@ -122,11 +133,16 @@ def ocr_extract_documents(file_bytes: bytes, lang: str = OCR_LANG,
     pdf = fitz.open(stream=file_bytes, filetype="pdf")
     try:
         for page_num, page in enumerate(pdf):
-            # 300 DPI — PDF default is 72, and OCR accuracy drops sharply below ~200.
-            pix = page.get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
+            if only_pages is not None and page_num not in only_pages:
+                continue
+            # 300 DPI by default — PDF default is 72, and OCR accuracy drops sharply below ~200.
+            pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72))
             image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            if threshold is not None:
+                image = image.convert("L").point(lambda p, t=threshold: 255 if p > t else 0)
             data = pytesseract.image_to_data(
-                image, lang=lang, output_type=pytesseract.Output.DICT)
+                image, lang=lang, output_type=pytesseract.Output.DICT,
+                config=f"--psm {psm}" if psm is not None else "")
 
             # Rebuild line structure from Tesseract's block/paragraph/line ids —
             # line breaks carry meaning in contracts, and a flat word join

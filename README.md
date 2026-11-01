@@ -60,6 +60,11 @@ are ones the model cannot be prompted out of — see §4.
 | `analysis_sets.py` | Per-document-type question sets for the parallel analysis |
 | `eval_rag.py`, `eval_fixtures.py` | Golden-set evaluation across indexing configurations |
 | `benchmark_parallelism.py` | Parallel-vs-sequential measurement with order-bias controls |
+| `answering.py` | Full-context answering, lifted out of `app.py` so the agent can import it without Streamlit |
+| `agent_graph.py`, `agent_state.py` | The verification loop as a LangGraph graph: bounded retry, best-of, checkpointing |
+| `agent_tools.py` | Three read-only tools (search, read page, re-read a page) with strict schemas; a re-read counts only when two reads agree |
+| `agent_llm.py`, `cost_tracking.py` | The OpenAI answerer (backoff + model fallback) and per-call token/cost accounting |
+| `run_agent.py` | CLI for the agent: budget, checkpoints, resume, purge |
 | `test_*.py` | Deterministic tests; `test_damage_regression.py` replays three real failures |
 | `main.py` | A standalone CLI sanity harness, predating the extraction work — **not** the entry point and without the OCR path |
 
@@ -174,6 +179,122 @@ Data density varies by document type — a dense résumé versus a sprawling leg
     resets the session, so the data is gone when you say so rather than when the process
     restarts.
 
+## 🤖 Verification Agent (LangGraph)
+
+`verification.py` already knows when an answer is wrong. Until now that knowledge ended in
+a warning badge. The agent turns it into a **bounded retry**: the failed answer's findings
+become evidence (tools re-read the document), the model answers again, and the same checks
+run again.
+
+```mermaid
+flowchart TD
+    S([question]) --> A["answer: whole document in context"]
+    A -->|model unreachable| F
+    A --> V["verify: the four checks of §4"]
+    V -->|clean| F["finalize: best attempt, status, cost, trace"]
+    V -->|findings, and bounds allow| I["investigate: findings become tool calls become notes"]
+    I --> A
+    V -->|a bound is hit| F
+```
+
+**It stops three ways, and never silently.** `max_attempts` (default 3); a per-question
+cost budget, checked *before* paying for another attempt (default $0.05, a guard rail, not
+a target); and a no-progress rule — identical findings two attempts running means a third
+will not differ. Hitting a bound returns the *best* attempt (fewest findings, latest on a
+tie, so a retry that made things worse is not what you see) with `status="degraded"` and the
+unresolved findings listed. An answer that failed its checks is never relabelled as fine.
+
+| Status | Meaning |
+|---|---|
+| `verified` | every check passed |
+| `degraded` | best answer returned **with** unresolved findings |
+| `budget_exceeded` | stopped retrying to stay inside the budget |
+| `failed` | the model could not be reached at all (returned as a result, not a traceback) |
+
+**Tools** (`agent_tools.py`): `search_document`, `read_page`, and `reocr_page`, which
+re-reads one page from its pixels at a resolution, Tesseract page-segmentation mode (`psm`)
+or black-and-white `threshold` you choose (the pipeline's own read is 300 DPI). All are
+read-only, have strict Pydantic schemas, and never raise: bad arguments, a missing
+Tesseract or an unmapped page come back as `ok=False`, costing the agent one piece of
+evidence rather than the run. Page numbers exist only for OCR extraction (the text layer
+arrives as one undifferentiated document), and the tools refuse rather than guess one.
+
+**A re-read is evidence, not authority.** `probe_reread.py` was written to test whether
+re-reading a damaged page recovers a lost value, and its first result on a real contract page
+(one page, one file) was negative twice over: the date that had been lost stayed lost at 300,
+400 and 600 DPI, and a date that *had* been read correctly was misread at 400 DPI. An earlier
+version of the agent added every re-read to the verification corpus, which would have let that
+one misread pass the fact check as "present in the document". Now a single re-read is never
+added. The agent reads a damaged page at two further resolutions (400 and 600 DPI), and a date
+or amount joins the corpus only if **both** reads produce it and the original page lacked it.
+The re-read *text* is never added, so a quote found only there is still flagged. When the reads
+do not agree, the model is told the damaged value is illegible.
+
+**State and privacy.** The document is *not* in graph state — state is what a checkpointer
+writes, and this project promises not to persist uploads. Checkpointing is opt-in
+(`--checkpoint-db`); what it writes is the per-question derivative (question, answer,
+quotes, findings, notes, cost), and `purge_thread` deletes it. A crashed run resumes from
+its last checkpoint *without calling the model again*. One thread per question, so retries
+never leak between questions; conversation history is passed in, as in the app.
+
+**Cost and latency.** Every model call reports usage through a callback; the total lives in
+state, so a resumed run continues the same bill. A model with no price entry, or a call that
+reported no usage, is flagged `cost_complete=False` — never shown as free. Each node's time
+is in the trace. The price table in `cost_tracking.py` is configuration: the one figure in
+it was read from a third-party aggregator (llmreference.com, page dated 2026-10-17), not
+from OpenAI — check it before quoting a cost.
+
+```bash
+python run_agent.py contract.pdf "מתי הפינוי?"                       # prints answer, status, cost, trace
+python run_agent.py contract.pdf "..." --budget 0.02 --attempts 2
+python run_agent.py contract.pdf "..." --checkpoint-db agent.sqlite --thread q1
+python run_agent.py contract.pdf --resume q1 --checkpoint-db agent.sqlite
+python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
+```
+
+**What this does not do, stated plainly:**
+- Its value is **only barely measured**. The tests use a scripted answerer, so the loop's
+  *mechanics* are proven; its *value* rests on a few live runs against gpt-4o-mini, summarised
+  in "What the live evals showed" below. In short: no harm found, one real fix, and a sample far
+  too small to quote a rate.
+- Full-context documents only. Larger documents go through retrieval, which the agent does
+  not cover; `build_agent` refuses them with a reason.
+- The investigate step is **rule-driven** (findings map to tool calls), not a model choosing
+  tools. Cheaper and testable, less flexible. The tools are real LangChain `StructuredTool`s,
+  so a model-driven policy can replace it without touching the rest.
+- Whether a re-read can ever recover a value that OCR *deleted* is **unproven**: on the one real
+  page tested it could not, at three resolutions. `probe_reread.py` with `--psm` and
+  `--threshold` tests other ways of reading the same pixels; if none works, the case for a second
+  OCR engine (see the roadmap) is the stronger one. A value a re-read does recover can still
+  leave a provenance warning, because the answer overlaps a passage the first extraction
+  damaged. That is conservative, not wrong.
+- Not wired into the Streamlit UI yet; it runs from the CLI.
+
+### What the live evals showed
+
+All on invented documents, gpt-4o-mini, 17 clean questions and 6 damaged documents (14 questions).
+Treat every number as "this happened", not "this is the rate": the samples are 1 to 5 questions,
+and temperature 0 is **not** deterministic on the API (one refusal in an early run never reproduced).
+
+- **Clean text:** one attempt and the loop both answered 17/17; the loop added about 2.5% cost.
+- **Damaged, answer lost (5 questions):** one attempt copied the OCR debris (`DYN 6`) into its answer
+  once, in the original reproduction, and admitted the value was unreadable in the other four. The
+  loop fixed the one, in 2 attempts, for about 27% more cost per question and 0.1s. It broke nothing.
+- **The damage caveat itself** (`eval_caveat.py`, three repeats, no agent): without it the model
+  invented or echoed on 6 of 15 damaged runs, with it on 3 of 15. So the caveat earns its place.
+  The same 3 are the original document, which echoes the debris under **every** prompt tried; only
+  the loop fixed it. The two mechanisms cover different failures.
+- **What the caveat costs:** one refusal of an answerable question in 24 control runs (it did not
+  repeat), and on one "damage nearby, answer intact" question the current wording picked the wrong
+  part of the clause. A narrower wording (`damage_caveat_narrow`, a candidate, not used by the app)
+  got that question's content right but still copied the debris, and was no better on damaged
+  questions. It was **not adopted**; the difference does not support changing the prompt.
+- **Not tested:** re-reading a page (these documents have no PDF behind them), larger samples,
+  other models, more than one kind of damage beyond a lost date.
+- **The scorer** knows only failures already seen, and several "honest" answers are the prompt's own
+  stock sentence ("does not show it legibly"), which the caveat tells the model to say. Read the
+  answers (`--json`) rather than the counts.
+
 ## 📊 Performance Benchmarks
 `benchmark_parallelism.py` sweeps fan-out from 2 to 10, running the *identical* question
 set both ways so exactly one variable changes. Seven reps per level, medians:
@@ -229,6 +350,12 @@ Everything except `smoke_resume.py` is deterministic and needs no API key:
 python test_verification.py        # 25 cases — quotes, dates, garbage echoes, provenance
 python test_damaged_values.py      # 10 cases — damage detection vs. correct Hebrew prose
 python test_damage_regression.py   # the three failure modes of §4, each still caught
+python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-or-nothing totals
+python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
+python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
+python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
+python test_eval_agent.py           # 28 cases — the agent eval's scoring and comparison, on scripted answers
+python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 
@@ -236,6 +363,12 @@ python smoke_resume.py             # one API call: exercises the résumé path
 model produced for a single clause and asserts each is still caught — the fabricated date
 by the fact check, the passed-through garbage by the echo check, and the fluent invented
 substitute by provenance alone. Remove a layer and it fails.
+
+The agent tests were themselves checked by mutation: ten deliberate breakages (drop the
+no-progress rule, drop the budget guard, leak the document into checkpointed state, report the
+wrong page, count an unpriced call as free, …) each make at least one test fail. They need
+`langgraph` and `langgraph-checkpoint-sqlite`; the re-read cases need Tesseract with `eng`
+and are skipped, loudly, without it.
 
 ## 🗺️ Roadmap
 *   **Two-engine OCR consensus.** The principled fix for the blind spot in §3: OCR a page
@@ -246,6 +379,14 @@ substitute by provenance alone. Remove a layer and it fails.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
+*   **Measure the agent properly.** `eval_agent.py` and `eval_caveat.py` have had live runs (see
+    "What the live evals showed"), on a handful of questions. Next: many more damaged documents
+    covering failures beyond a lost date (amounts, names), and repeats on every question. They also
+    cannot test re-reading, which needs a real PDF.
+*   **Derived figures in the fact check.** Decide whether a computed value (a percentage worked
+    out from printed figures) should count as supported, after reading what the loop did with
+    the one answer that tripped it.
+*   **Wire the agent into the UI** and extend it to the retrieval path.
 *   **Node-wise tracing:** LangSmith is wired up and **off by default** — enabling it
     sends document chunks, prompts and answers to a third party, which is a deliberate
     choice rather than a default for anyone handling real contracts.
@@ -291,11 +432,14 @@ python ocr_text_diff.py file.pdf             # image_to_string vs. rebuilt text,
 python damage_report.py file.pdf             # passages whose promised value is missing or corrupted
 python quote_probe.py "<quote>" file.pdf     # why a quote failed verification, to the character
 python chunk_report.py file.pdf              # what indexing actually produced
+python eval_agent.py                         # does the retry loop beat one attempt? needs OPENAI_API_KEY, costs cents
+python eval_caveat.py                        # does the damage caveat help, and does it cause over-refusal?
+python probe_reread.py file.pdf              # does re-reading a damaged page (other DPI, --psm, --threshold) recover the lost value?
 python stress_inputs.py                      # 9 adversarial PDFs against the extraction path
 ```
 
 ## 🛠️ Tech Stack
-*   **Orchestration:** [LangChain](https://langchain.com) (LCEL, async API)
+*   **Orchestration:** [LangChain](https://langchain.com) (LCEL, async API); [LangGraph](https://langchain-ai.github.io/langgraph/) for the verification agent
 *   **LLM:** OpenAI GPT-4o-mini
 *   **Vector DB:** [ChromaDB](https://trychroma.com)
 *   **Extraction:** PDFMiner, with PyMuPDF + Tesseract OCR fallback
