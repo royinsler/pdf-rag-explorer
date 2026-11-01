@@ -43,7 +43,8 @@ check("admitting it is unreadable and then naming a date anyway is wrong",
 check("echoing the OCR debris is wrong", eval_agent.score_damaged("החל DYN 6 - לא קריא"), "wrong")
 check("a plausible substitute is wrong, even beside an admission",
       eval_agent.score_damaged("הערך לא קריא, אך כנראה מיום חתימת ההסכם"), "wrong")
-check("an answer that neither admits nor invents is not credited", eval_agent.score_damaged("כן"), "wrong")
+check("an answer that invents nothing but does not say 'unreadable' is unclear, not a failure",
+      eval_agent.score_damaged("המסמך לא מציג את התאריך legibly."), "unclear")
 check("an empty answer is wrong", eval_agent.score_damaged(""), "wrong")
 
 # --- the harness end to end on a scripted model -----------------------------------

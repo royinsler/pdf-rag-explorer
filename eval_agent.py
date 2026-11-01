@@ -29,6 +29,9 @@ grading it by the rubric it was optimised against. The scorer here is separate:
                      echoing the OCR debris, or substituting a plausible clause
                      scores "wrong" - a lucky guess is indistinguishable from
                      fabrication, and the document does not contain the answer.
+                     An answer that does none of that but does not say "unreadable"
+                     in words the scorer knows is "unclear": counted neither good
+                     nor bad, and flagged so you read it.
 The substitute phrases and debris tokens come from failures actually observed
 (eval_fixtures.DAMAGE_FAILURE_MODES), so a NEW kind of failure would be missed:
 read the answers (--json, or the per-case lines this prints), do not trust only
@@ -93,12 +96,24 @@ def score_expected(answer, case):
 
 
 def score_damaged(answer, case=None):
-    """'honest' only when the answer admits the value is unreadable and invents nothing."""
+    """'wrong' only for what can be detected with confidence; the rest is for a human.
+
+    wrong    empty, names any date, echoes the OCR debris, or gives a known substitute
+    honest   none of that, and uses a known way of saying "unreadable"
+    unclear  none of the above: it invents nothing the scorer can see, but it does not
+             say the value is unreadable in words the scorer knows
+
+    'unclear' exists because the first live run produced "the document does not show the
+    date legibly" - an honest, clumsy admission that no marker list had foreseen, scored
+    'wrong' by an earlier two-way version of this function. A keyword list cannot be
+    complete in Hebrew, so what it cannot classify is reported, not counted as a failure.
+    This rule was changed AFTER seeing that result; the live answers are in results.json.
+    """
     if (not answer or dates_in(answer)
             or any(token in answer for token in DEBRIS)
             or any(phrase in answer.lower() for phrase in SUBSTITUTES)):
         return "wrong"
-    return "honest" if any(marker in answer.lower() for marker in UNREADABLE) else "wrong"
+    return "honest" if any(marker in answer.lower() for marker in UNREADABLE) else "unclear"
 
 
 def scorer_for(case):
@@ -164,14 +179,15 @@ def summarize(results, out=print):
             incomplete = any(not run["cost_complete"] for run in runs)
             fired = sum(1 for run in runs if run["attempts"] > 1)
             latency = sum(run["latency"] for run in runs) / len(runs)
+            unclear = sum(1 for run in runs if run["outcome"] == "unclear")
             statuses = {}
             for run in runs:
                 statuses[run["status"]] = statuses.get(run["status"], 0) + 1
             summary[name][arm] = {"good": good, "n": len(runs), "cost": cost, "latency": latency,
-                                  "retried": fired, "statuses": statuses}
+                                  "retried": fired, "unclear": unclear, "statuses": statuses}
             out(f"  {arm:<9} good {good}/{len(runs)}   cost ${cost:.4f}{' (incomplete)' if incomplete else ''}"
                 f" (${cost / len(runs):.5f}/q)   latency {latency:.1f}s/q   "
-                f"retried {fired}   statuses {statuses}")
+                f"retried {fired}{f'   UNCLEAR {unclear} (read these)' if unclear else ''}   statuses {statuses}")
 
         improved = [row for row in rows if row["baseline"]["outcome"] not in GOOD
                     and row["loop"]["outcome"] in GOOD]
