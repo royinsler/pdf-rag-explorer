@@ -254,17 +254,9 @@ python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
 
 **What this does not do, stated plainly:**
 - Its value is **only barely measured**. The tests use a scripted answerer, so the loop's
-  *mechanics* are proven; `eval_agent.py` then ran it once against gpt-4o-mini, one attempt vs.
-  the loop. On the 17 clean-contract questions (3 runs each, temperature 0, so effectively 17)
-  both arms answered all correctly and the loop added about 2.5% cost ($0.00039 → $0.00040 per
-  question). On the one damaged-clause question the single attempt copied the OCR debris
-  (`DYN 6`) into its answer and the loop did not; it said instead that the document does not show
-  the date legibly, clumsily and with an English word in a Hebrew sentence. That cost about 22%
-  more ($0.00015 → $0.00018) and 0.2s. **That is one question.** It shows the loop can change
-  that failure; it does not show a rate. One clean-text answer was flagged `degraded` for a
-  percentage the model *computed* (not printed in the contract); the cause is unconfirmed, but if
-  the fact check treats derived figures as unsupported it will raise false alarms on correct
-  calculations.
+  *mechanics* are proven; its *value* rests on a few live runs against gpt-4o-mini, summarised
+  in "What the live evals showed" below. In short: no harm found, one real fix, and a sample far
+  too small to quote a rate.
 - Full-context documents only. Larger documents go through retrieval, which the agent does
   not cover; `build_agent` refuses them with a reason.
 - The investigate step is **rule-driven** (findings map to tool calls), not a model choosing
@@ -277,6 +269,31 @@ python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
   leave a provenance warning, because the answer overlaps a passage the first extraction
   damaged. That is conservative, not wrong.
 - Not wired into the Streamlit UI yet; it runs from the CLI.
+
+### What the live evals showed
+
+All on invented documents, gpt-4o-mini, 17 clean questions and 6 damaged documents (14 questions).
+Treat every number as "this happened", not "this is the rate": the samples are 1 to 5 questions,
+and temperature 0 is **not** deterministic on the API (one refusal in an early run never reproduced).
+
+- **Clean text:** one attempt and the loop both answered 17/17; the loop added about 2.5% cost.
+- **Damaged, answer lost (5 questions):** one attempt copied the OCR debris (`DYN 6`) into its answer
+  once, in the original reproduction, and admitted the value was unreadable in the other four. The
+  loop fixed the one, in 2 attempts, for about 27% more cost per question and 0.1s. It broke nothing.
+- **The damage caveat itself** (`eval_caveat.py`, three repeats, no agent): without it the model
+  invented or echoed on 6 of 15 damaged runs, with it on 3 of 15. So the caveat earns its place.
+  The same 3 are the original document, which echoes the debris under **every** prompt tried; only
+  the loop fixed it. The two mechanisms cover different failures.
+- **What the caveat costs:** one refusal of an answerable question in 24 control runs (it did not
+  repeat), and on one "damage nearby, answer intact" question the current wording picked the wrong
+  part of the clause. A narrower wording (`damage_caveat_narrow`, a candidate, not used by the app)
+  got that question's content right but still copied the debris, and was no better on damaged
+  questions. It was **not adopted**; the difference does not support changing the prompt.
+- **Not tested:** re-reading a page (these documents have no PDF behind them), larger samples,
+  other models, more than one kind of damage beyond a lost date.
+- **The scorer** knows only failures already seen, and several "honest" answers are the prompt's own
+  stock sentence ("does not show it legibly"), which the caveat tells the model to say. Read the
+  answers (`--json`) rather than the counts.
 
 ## 📊 Performance Benchmarks
 `benchmark_parallelism.py` sweeps fan-out from 2 to 10, running the *identical* question
@@ -337,7 +354,8 @@ python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-o
 python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
 python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
-python test_eval_agent.py           # 24 cases — the agent eval's scoring and comparison, on scripted answers
+python test_eval_agent.py           # 28 cases — the agent eval's scoring and comparison, on scripted answers
+python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 
@@ -361,10 +379,10 @@ and are skipped, loudly, without it.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
-*   **Measure the agent properly.** `eval_agent.py` exists and has had one live run (see "What
-    this does not do"); that run had a single damaged question. The next step is more damaged
-    cases, covering more than one failure mode, and a sampling temperature above 0 so repeats
-    carry information. It also cannot test re-reading, which needs a real PDF.
+*   **Measure the agent properly.** `eval_agent.py` and `eval_caveat.py` have had live runs (see
+    "What the live evals showed"), on a handful of questions. Next: many more damaged documents
+    covering failures beyond a lost date (amounts, names), and repeats on every question. They also
+    cannot test re-reading, which needs a real PDF.
 *   **Derived figures in the fact check.** Decide whether a computed value (a percentage worked
     out from printed figures) should count as supported, after reading what the loop did with
     the one answer that tripped it.
@@ -415,6 +433,7 @@ python damage_report.py file.pdf             # passages whose promised value is 
 python quote_probe.py "<quote>" file.pdf     # why a quote failed verification, to the character
 python chunk_report.py file.pdf              # what indexing actually produced
 python eval_agent.py                         # does the retry loop beat one attempt? needs OPENAI_API_KEY, costs cents
+python eval_caveat.py                        # does the damage caveat help, and does it cause over-refusal?
 python probe_reread.py file.pdf              # does re-reading a damaged page (other DPI, --psm, --threshold) recover the lost value?
 python stress_inputs.py                      # 9 adversarial PDFs against the extraction path
 ```
