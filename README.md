@@ -296,7 +296,7 @@ python run_agent.py --memory-db memory.sqlite --forget-memory       # wipe it
 ### What the live evals showed
 
 All on invented documents, gpt-4o-mini, 17 clean questions and the earlier 6-document damaged suite (14 questions; the suite now has 13 documents).
-Treat every number as "this happened", not "this is the rate": the samples are 1 to 5 questions,
+The scorer was widened twice after seeing live results (the prompt's own "does not show it legibly" sentence is now an honest answer). Treat every number as "this happened", not "this is the rate": the samples are 1 to 5 questions,
 and temperature 0 is **not** deterministic on the API (one refusal in an early run never reproduced).
 
 - **Clean text:** one attempt and the loop both answered 17/17; the loop added about 2.5% cost.
@@ -377,7 +377,7 @@ python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-o
 python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
 python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
-python test_eval_agent.py           # 28 cases — the agent eval's scoring and comparison, on scripted answers
+python test_eval_agent.py           # 33 cases — the agent eval's scoring and comparison, on scripted answers
 python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python test_agent_memory.py         # 46 cases — retry memory: counters, policy, probes, privacy dump, loop, CLI
 python smoke_resume.py             # one API call: exercises the résumé path
@@ -403,6 +403,7 @@ and are skipped, loudly, without it.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
+*   **The relational false alarms.** In the 13-document run, retries on the three relational questions (damage near an intact answer) produced identical answers 9 times out of 9 and cost 2-3 attempts each, one ending `degraded` on a correct answer. `--json` now records the first attempt's findings; run it and see which check fires before changing anything.
 *   **Measure the agent properly.** The damaged suite has since grown from 6 to 13 documents (29 questions, all lost-date damage), but the numbers above are from the smaller run; re-run `eval_agent.py --suite damaged --repeats 3` for the larger one. `eval_agent.py` and `eval_caveat.py` have had live runs (see
     "What the live evals showed"), on a handful of questions. Next: many more damaged documents
     covering failures beyond a lost date (amounts, names), and repeats on every question. They also

@@ -48,7 +48,15 @@ check("echoing the OCR debris is wrong", eval_agent.score_damaged("החל DYN 6 
 check("a plausible substitute is wrong, even beside an admission",
       eval_agent.score_damaged("הערך לא קריא, אך כנראה מיום חתימת ההסכם"), "wrong")
 check("an answer that invents nothing but does not say 'unreadable' is unclear, not a failure",
-      eval_agent.score_damaged("המסמך לא מציג את התאריך legibly."), "unclear")
+      eval_agent.score_damaged("אין לי מידע על כך."), "unclear")
+check("the prompt's own stock sentence ('does not show it legibly') is an honest admission",
+      eval_agent.score_damaged("המסמך לא מציג את התאריך legibly, וההוצאה לאור נראית פגומה."), "honest")
+check("a plain Hebrew 'not shown clearly' is honest too",
+      eval_agent.score_damaged("התאריך לא מוצג בצורה ברורה במסמך."), "honest")
+check("the stock sentence followed by a date is still wrong",
+      eval_agent.score_damaged("לא מוצג legibly, אך כנראה 8.8.2027"), "wrong")
+check("an answer with no marker at all stays unclear",
+      eval_agent.score_damaged("אין לי מידע על כך."), "unclear")
 check("an empty answer is wrong", eval_agent.score_damaged(""), "wrong")
 
 # --- the harness end to end on a scripted model -----------------------------------
@@ -93,6 +101,9 @@ check("the loop used a second attempt only on the damaged questions",
 check("the relational question is answered correctly by both arms, with no retry",
       {(row["baseline"]["outcome"], row["loop"]["outcome"], row["loop"]["attempts"])
        for row in rows if row["kind"] == "relational"}, {("pass", "pass", 1)})
+check("each run records what the first attempt was objected to for",
+      all("first_findings" in row["loop"] and "first_findings" in row["baseline"] for row in rows)
+      and all(row["loop"]["first_findings"] == [] for row in rows if row["loop"]["attempts"] == 1), True)
 check("baseline is one attempt, always", {row["baseline"]["attempts"] for row in rows}, {1})
 
 summary = eval_agent.summarize({"damaged": rows}, out=lambda *_: None)["damaged"]

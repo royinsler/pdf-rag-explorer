@@ -73,7 +73,10 @@ DEBRIS = ("DYN", "DPN", "DWNT", "DION")
 SUBSTITUTES = ("חתימת ההסכם", "יום החתימה", "מיום החתימה", "signing of the agreement", "date of signing")
 UNREADABLE = ("לא קריא", "אינו קריא", "לא ניתן לקרוא", "לא ניתן לקבוע", "לא ניתן לדעת",
               "פגום", "לא ברור", "מטושטש", "illegible", "unreadable", "not legible",
-              "cannot be determined", "cannot be read", "damaged")
+              "cannot be determined", "cannot be read", "damaged",
+              # Added after the 87-run live eval, where 63 answers were scored 'unclear' only
+              # because of these: the prompt's own stock sentence, and a plain Hebrew variant.
+              "legibly", "לא מוצג בצורה ברורה", "לא מוצגת בצורה ברורה")
 
 # The question whose answer extraction destroyed, and three whose answers survived.
 DAMAGED_QUESTIONS = [
@@ -114,6 +117,9 @@ def score_damaged(answer, case=None):
     'wrong' by an earlier two-way version of this function. A keyword list cannot be
     complete in Hebrew, so what it cannot classify is reported, not counted as a failure.
     This rule was changed AFTER seeing that result; the live answers are in results.json.
+    It was changed AGAIN after the 87-run eval (markers 'legibly' and 'לא מוצג בצורה ברורה'):
+    every one of the 63 answers it had called unclear was read by hand first and was an honest
+    admission. Those runs scored 'honest' only because the list now knows the phrases.
     """
     if (not answer or dates_in(answer)
             or any(token in answer for token in DEBRIS)
@@ -154,7 +160,11 @@ def run_case(agent, case):
     return {"answer": answer, "outcome": scorer_for(case)(answer, case),
             "status": report["status"], "attempts": report["attempts"],
             "cost": report["cost_usd"], "cost_complete": report["cost_complete"],
-            "latency": report["latency_s"]}
+            "latency": report["latency_s"],
+            # What the checks objected to on the FIRST attempt (the retry's reason), so a
+            # retry that changed nothing can be told from one that fixed something.
+            "first_findings": next((step.get("details", []) for step in report["trace"]
+                                    if step["node"] == "verify"), [])}
 
 
 def evaluate(answerer, suites, attempts=MAX_ATTEMPTS, budget=0.05, repeats=1, seed=0, log=print):
