@@ -484,3 +484,108 @@ DAMAGED_CASES = [
         ],
     },
 ]
+
+
+# Added to widen the damaged suite beyond the first five documents: the connectors not yet
+# used ("מתאריך", "לא יאוחר", "ליום", "החל"), different debris shapes (digits, lowercase
+# Latin, a bare clause number), more than one damaged clause per document, and two more
+# relational questions (damage nearby, the answer intact). All values are invented. Dates
+# only: damage_values detects lost dates, so lost amounts or names are not yet testable.
+DAMAGED_CASES += [
+    {
+        "id": "metaarich",
+        "text": """
+הסכם שכירות לדירת מגורים בין המשכיר לבין השוכר.
+דמי השכירות החודשיים הם 5,900 ש"ח, כולל ארנונה.
+השוכר יהיה רשאי להחזיק חיית מחמד מתאריך WN 4, בכפוף לאישור בכתב.
+""",
+        "low_confidence": [("WN", 77.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "מאיזה תאריך השוכר רשאי להחזיק חיית מחמד?", "kind": "damaged"},
+            {"question": "מהם דמי השכירות החודשיים עבור הדירה?", "expect": "5,900", "kind": "control"},
+        ],
+    },
+    {
+        "id": "lo_yeachar",
+        "text": """
+הסכם לאספקת ציוד מחשוב בין הספק לבין הרוכש.
+מחיר העסקה הוא 212,000 ש"ח, והוא כולל התקנה והדרכה.
+הספק ימסור את הציוד לא יאוחר מיום DPN 1. מסירה באיחור תזכה את הרוכש בהנחה.
+""",
+        "low_confidence": [("DPN", 80.0), ("DWNT", 5.0)],
+        "questions": [
+            {"question": "עד מתי הספק חייב למסור את הציוד?", "kind": "damaged"},
+            {"question": "מהו מחיר העסקה?", "expect": "212,000", "kind": "control"},
+        ],
+    },
+    {
+        "id": "leyom",
+        "text": """
+הסכם שירותי ניקיון למשרדים בין החברה לבין הקבלן.
+התמורה החודשית היא 14,300 ש"ח בתוספת מע"מ כדין.
+תקופת ההסכם תסתיים ליום 2 YN, אלא אם הצדדים יאריכו אותה בכתב.
+""",
+        "low_confidence": [("YN", 83.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "באיזה יום מסתיימת תקופת ההסכם?", "kind": "damaged"},
+            {"question": "מהי התמורה החודשית?", "expect": "14,300", "kind": "control"},
+        ],
+    },
+    {
+        "id": "hachel",
+        "text": """
+הסכם הקמת אתר אינטרנט בין המזמין לבין חברת הפיתוח.
+העלות הכוללת היא 38,500 ש"ח, בשלושה שלבי תשלום.
+תחילת העבודה תהיה החל מ DYN 7, ובהתאם ללוח הזמנים שבנספח.
+""",
+        "low_confidence": [("DYN", 74.0), ("DION", 12.0)],
+        "questions": [
+            {"question": "מתי מתחילה העבודה על האתר?", "kind": "damaged"},
+            {"question": "מהי העלות הכוללת של הפרויקט?", "expect": "38,500", "kind": "control"},
+        ],
+    },
+    {
+        # Two damaged clauses in one document: the model must be honest about both,
+        # and must not borrow the date of one for the other.
+        "id": "two_holes",
+        "text": """
+הסכם שיתוף פעולה בין שתי חברות לפיתוח תוכנה.
+החלוקה הקבועה בין הצדדים היא 60% ו-40%.
+תחילת שיתוף הפעולה תהיה ביום 5 DWNT, וסיומו ביום DPN 3. הצדדים יסכמו הארכה בכתב.
+""",
+        "low_confidence": [("DWNT", 6.0), ("DPN", 18.0)],
+        "questions": [
+            {"question": "באיזה תאריך מתחיל שיתוף הפעולה?", "kind": "damaged"},
+            {"question": "באיזה תאריך מסתיים שיתוף הפעולה?", "kind": "damaged"},
+            {"question": "מהי החלוקה בין הצדדים?", "expect": "60", "kind": "control"},
+        ],
+    },
+    {
+        "id": "relational2",
+        "text": """
+הסכם שירות בין הספק לבין הלקוח.
+זמן התגובה לתקלה קריטית הוא ארבע שעות, החל מרגע קבלת הפנייה DION במוקד.
+בגין חריגה מזמן התגובה יינתן ללקוח זיכוי של 1,100 ש"ח לכל חריגה.
+""",
+        "low_confidence": [("DION", 9.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "מה זמן התגובה לתקלה קריטית?",
+             "expect_any": ["ארבע שעות", "4 שעות", "4 hours"], "kind": "relational"},
+            {"question": "מהו הזיכוי בגין חריגה מזמן התגובה?", "expect": "1,100", "kind": "control"},
+        ],
+    },
+    {
+        "id": "relational3",
+        "text": """
+הסכם הלוואה בין המלווה לבין הלווה.
+הריבית השנתית היא 4.2%, והיא תחושב מיום קבלת ההלוואה בפועל WN על היתרה הבלתי מסולקת.
+הלווה יחזיר את ההלוואה ב-36 תשלומים חודשיים שווים.
+""",
+        "low_confidence": [("WN", 8.0), ("yt", 0.0)],
+        "questions": [
+            {"question": "מאיזה מועד נצברת הריבית?",
+             "expect_any": ["קבלת ההלוואה", "מיום קבלת"], "kind": "relational"},
+            {"question": "בכמה תשלומים יוחזר הכסף?", "expect": "36", "kind": "control"},
+        ],
+    },
+]

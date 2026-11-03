@@ -60,6 +60,8 @@ def model(question, doc_text, history, caveat, notes, config):
 rows = eval_caveat.evaluate(model, build_suites()["damaged"], repeats=2, log=lambda *_: None)
 n_damaged = sum(1 for c in CASES.values() if c["kind"] == "damaged")
 n_answerable = len(CASES) - n_damaged
+n_control = sum(1 for c in CASES.values() if c["kind"] == "control")
+n_rel = sum(1 for c in CASES.values() if c["kind"] == "relational")
 check("none: every damaged question is invented",
       eval_caveat.tally(rows, "damaged", "none"), {"wrong": n_damaged * 2})
 check("current and narrow admit it on every damaged question",
@@ -68,7 +70,7 @@ check("current and narrow admit it on every damaged question",
 check("current over-refuses every answerable question; narrow and none do not",
       (eval_caveat.tally(rows, "control", "current"), eval_caveat.tally(rows, "control", "narrow"),
        eval_caveat.tally(rows, "relational", "current"), eval_caveat.tally(rows, "relational", "narrow")),
-      ({"fail": 16}, {"pass": 16}, {"fail": 2}, {"pass": 2}))
+      ({"fail": 2 * n_control}, {"pass": 2 * n_control}, {"fail": 2 * n_rel}, {"pass": 2 * n_rel}))
 
 lines = []
 code = eval_caveat.main(["--repeats", "2"], answerer=model, out=lines.append)

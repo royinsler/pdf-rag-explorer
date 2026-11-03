@@ -75,8 +75,8 @@ check("it runs and exits 0", code, 0)
 N_DAMAGED = len(eval_agent.DAMAGED_QUESTIONS) + sum(len(c["questions"]) for c in eval_agent.DAMAGED_CASES)
 check("it states the most it could spend before running",
       f"at most {N_DAMAGED * 2 * 4} model calls" in text, True)
-check("the damaged suite spans six documents, one per connector plus the relational case",
-      (len(eval_agent.build_suites()["damaged"]), len(eval_agent.DAMAGED_CASES)), (6, 5))
+check("the damaged suite spans thirteen documents: the original, then one per damage shape, three relational",
+      (len(eval_agent.build_suites()["damaged"]), len(eval_agent.DAMAGED_CASES)), (13, 12))
 check("every damaged document is actually detected as damaged",
       all(ctx.damaged for ctx, _ in eval_agent.build_suites()["damaged"]), True)
 

@@ -295,7 +295,7 @@ python run_agent.py --memory-db memory.sqlite --forget-memory       # wipe it
 
 ### What the live evals showed
 
-All on invented documents, gpt-4o-mini, 17 clean questions and 6 damaged documents (14 questions).
+All on invented documents, gpt-4o-mini, 17 clean questions and the earlier 6-document damaged suite (14 questions; the suite now has 13 documents).
 Treat every number as "this happened", not "this is the rate": the samples are 1 to 5 questions,
 and temperature 0 is **not** deterministic on the API (one refusal in an early run never reproduced).
 
@@ -403,7 +403,7 @@ and are skipped, loudly, without it.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
-*   **Measure the agent properly.** `eval_agent.py` and `eval_caveat.py` have had live runs (see
+*   **Measure the agent properly.** The damaged suite has since grown from 6 to 13 documents (29 questions, all lost-date damage), but the numbers above are from the smaller run; re-run `eval_agent.py --suite damaged --repeats 3` for the larger one. `eval_agent.py` and `eval_caveat.py` have had live runs (see
     "What the live evals showed"), on a handful of questions. Next: many more damaged documents
     covering failures beyond a lost date (amounts, names), and repeats on every question. They also
     cannot test re-reading, which needs a real PDF.
