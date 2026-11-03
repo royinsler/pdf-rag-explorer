@@ -270,6 +270,29 @@ python run_agent.py contract.pdf --purge q1 --checkpoint-db agent.sqlite
   damaged. That is conservative, not wrong.
 - Not wired into the Streamlit UI yet; it runs from the CLI.
 
+### Long-term memory: which retries actually work
+
+State (`agent_state.py`) lives for one question. The one thing worth carrying *between* questions
+is how often a retry resolved each kind of finding, because that changes behaviour: if retries on a
+kind almost never help, the loop stops paying for them and reports `degraded` at once
+(`stop_reason: hopeless`, with the numbers in the warning).
+
+```bash
+python run_agent.py contract.pdf "..." --memory-db memory.sqlite   # learn and use
+python run_agent.py --memory-db memory.sqlite --memory-stats        # per kind: tries, fixed, rate
+python run_agent.py --memory-db memory.sqlite --forget-memory       # wipe it
+```
+
+- **What is stored:** counters per (scope, finding kind): `tries`, `fixes`, `hopeless`. No question,
+  answer, quote, document text, page or file name. Kinds come from a fixed list of four; anything
+  else is ignored. A test dumps the database and the raw file bytes and searches them.
+- **It cannot starve itself:** nothing is judged before 10 tries of a kind, and every 10th hopeless
+  run retries anyway, so the numbers can still move.
+- **Not recorded:** runs with no retry, runs that ended in a model error, and clean first answers.
+- **Honest status:** the thresholds (10 tries, 10% fix rate, probe every 10) are starting guesses,
+  not measured. It has only run against a scripted model. Read `--memory-stats` after real use and
+  see whether the picture is sensible before trusting the policy.
+
 ### What the live evals showed
 
 All on invented documents, gpt-4o-mini, 17 clean questions and 6 damaged documents (14 questions).
@@ -356,6 +379,7 @@ python test_agent_graph.py         # 80 cases — every way the loop can fail, r
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
 python test_eval_agent.py           # 28 cases — the agent eval's scoring and comparison, on scripted answers
 python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
+python test_agent_memory.py         # 46 cases — retry memory: counters, policy, probes, privacy dump, loop, CLI
 python smoke_resume.py             # one API call: exercises the résumé path
 ```
 

@@ -4,6 +4,9 @@
     python run_agent.py contract.pdf "..." --budget 0.02 --attempts 2
     python run_agent.py contract.pdf "..." --checkpoint-db agent.sqlite --thread q1
     python run_agent.py contract.pdf --resume q1 --checkpoint-db agent.sqlite
+    python run_agent.py contract.pdf "..." --memory-db memory.sqlite     # learn which retries work
+    python run_agent.py --memory-db memory.sqlite --memory-stats         # what it has learned
+    python run_agent.py --memory-db memory.sqlite --forget-memory        # wipe it
 
 Needs OPENAI_API_KEY (from the environment or .env), like the Streamlit app.
 `main` takes an injectable answerer so the whole path - real extraction, real
@@ -14,6 +17,7 @@ import json
 import os
 import sys
 
+from agent_memory import RetryMemory
 from agent_graph import Agent, build_agent, purge_thread, sqlite_checkpointer
 from agent_state import MAX_ATTEMPTS
 from agent_tools import DocumentContext
@@ -37,7 +41,7 @@ def _print_report(report):
 
 def main(argv=None, answerer=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("pdf")
+    parser.add_argument("pdf", nargs="?")
     parser.add_argument("question", nargs="?")
     parser.add_argument("--budget", type=float, default=0.05, help="USD per question (default 0.05)")
     parser.add_argument("--attempts", type=int, default=MAX_ATTEMPTS)
@@ -46,7 +50,30 @@ def main(argv=None, answerer=None) -> int:
     parser.add_argument("--resume", metavar="THREAD", help="continue an interrupted run")
     parser.add_argument("--purge", metavar="THREAD", help="delete a thread's checkpoints and exit")
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    parser.add_argument("--memory-db", help="SQLite file for long-term memory of which retries work "
+                                            "(counters per finding kind; never any document text)")
+    parser.add_argument("--memory-stats", action="store_true", help="print what the memory has learned and exit")
+    parser.add_argument("--forget-memory", action="store_true", help="delete the memory and exit")
     args = parser.parse_args(argv)
+
+    memory = RetryMemory(args.memory_db) if args.memory_db else None
+    if args.memory_stats or args.forget_memory:
+        if memory is None:
+            parser.error("--memory-stats and --forget-memory need --memory-db")
+        if args.forget_memory:
+            memory.forget()
+            print("memory cleared")
+        else:
+            stats = memory.stats()
+            if not stats:
+                print("memory is empty")
+            for kind, row in stats.items():
+                rate = f"{row['fixes'] / row['tries']:.0%}" if row["tries"] else "n/a"
+                print(f"{kind:<18} tries={row['tries']:<4} fixed={row['fixes']:<4} ({rate})  "
+                      f"judged hopeless in {row['hopeless']} run(s)")
+        return 0
+    if not args.pdf:
+        parser.error("give a PDF, or use --memory-stats / --forget-memory")
 
     checkpointer = sqlite_checkpointer(args.checkpoint_db) if args.checkpoint_db else None
     if args.purge:
@@ -76,7 +103,7 @@ def main(argv=None, answerer=None) -> int:
 
     ctx = DocumentContext.from_extraction(extraction, file_bytes=file_bytes)
     agent: Agent = build_agent(ctx, answerer, budget_usd=args.budget,
-                               max_attempts=args.attempts, checkpointer=checkpointer)
+                               max_attempts=args.attempts, checkpointer=checkpointer, memory=memory)
     report = agent.resume(args.resume) if args.resume else agent.run(args.question, thread_id=args.thread)
 
     if args.json:

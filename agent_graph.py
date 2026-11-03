@@ -97,7 +97,8 @@ def _best_attempt(attempts_log: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
     return min(reversed(attempts_log), key=lambda a: len(a["findings"]))
 
 
-def stop_reason(state: AgentState, max_attempts: int, budget_usd: float) -> Optional[str]:
+def stop_reason(state: AgentState, max_attempts: int, budget_usd: float,
+                hopeless: Optional[Callable[[AgentState], bool]] = None) -> Optional[str]:
     """None to keep going, otherwise why the loop is ending.
 
     Order matters and is the order of severity: a model that cannot be reached
@@ -116,6 +117,11 @@ def stop_reason(state: AgentState, max_attempts: int, budget_usd: float) -> Opti
     log = state.get("attempts_log", [])
     if len(log) >= 2 and _signature(log[-1]["findings"]) == _signature(log[-2]["findings"]):
         return "no_progress"
+    # Last and least certain: a judgement from past runs, not from this one. It never
+    # outranks a clean answer or a hard bound, and it is only as good as agent_memory's
+    # statistics (see there for what guards it).
+    if hopeless is not None and hopeless(state):
+        return "hopeless"
     return None
 
 
@@ -175,12 +181,16 @@ class Agent:
 
 def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
                 budget_usd: float = 0.05, max_attempts: int = MAX_ATTEMPTS,
-                checkpointer=None) -> Agent:
+                checkpointer=None, memory=None) -> Agent:
     """Assemble the graph for one document.
 
     budget_usd is per question, not per session. The default is a guard rail
     sized for gpt-4o-mini on a contract-length document - a deliberately low
     number, so that a runaway loop is a small bill; raise it knowingly.
+
+    memory is an optional agent_memory.RetryMemory. With it the loop stops retrying
+    finding kinds that history says retries almost never resolve, and records how
+    each run turned out. Without it nothing is read or written.
     """
     from extraction import FULL_CONTEXT_MAX_CHARS, fits_in_context
     if not fits_in_context(ctx.text):
@@ -190,6 +200,10 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
             "documents go through retrieval, which it does not handle yet.")
 
     tools = build_tools(ctx)
+
+    def hopeless(state: AgentState) -> bool:
+        return memory is not None and not memory.worth_retrying(
+            f["kind"] for f in state.get("findings", []))
 
     def answer_node(state: AgentState):
         started = time.perf_counter()
@@ -304,7 +318,7 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
 
     def finalize_node(state: AgentState):
         started = time.perf_counter()
-        reason = stop_reason(state, max_attempts, budget_usd) or "max_attempts"
+        reason = stop_reason(state, max_attempts, budget_usd, hopeless) or "max_attempts"
         best = _best_attempt(state.get("attempts_log", []))
         doc = ctx.verification_text()
         warnings: List[str] = []
@@ -335,7 +349,20 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
                     "budget": f"Stopped to stay inside the ${budget_usd:.2f} budget.",
                     "no_progress": "Stopped: a retry produced the same findings as the one before.",
                     "error": f"A retry failed ({state.get('error')}); returning the best earlier attempt.",
+                    "hopeless": "Stopped without retrying: past retries rarely resolved this ("
+                                + (memory.describe(f["kind"] for f in best["findings"]) if memory else "")
+                                + ").",
                 }.get(reason, "Stopped.") + f" Unresolved: {unresolved}.")
+
+        # Remember how this run went. Only counters per finding kind - never text - and
+        # not when the model failed mid-retry: that run says nothing about whether a
+        # retry works.
+        log = state.get("attempts_log", [])
+        if memory is not None and best is not None and log and reason != "error":
+            first_kinds = [f["kind"] for f in log[0]["findings"]]
+            memory.record(first_kinds, [f["kind"] for f in best["findings"]],
+                          retried=state.get("attempt", 0) > 1,
+                          hopeless=memory.judged_hopeless(first_kinds))
 
         trace = list(state.get("trace", []))
         total_seconds = sum(entry.get("seconds", 0.0) for entry in trace)
@@ -356,7 +383,7 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
         return "finalize" if state.get("error") else "verify"
 
     def after_verify(state: AgentState) -> str:
-        return "finalize" if stop_reason(state, max_attempts, budget_usd) else "investigate"
+        return "finalize" if stop_reason(state, max_attempts, budget_usd, hopeless) else "investigate"
 
     graph = StateGraph(AgentState)
     graph.add_node("answer", answer_node)
