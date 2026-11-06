@@ -154,7 +154,22 @@ def build_suites():
     }
 
 
-def run_case(agent, case):
+def recording(answerer, sink):
+    """Wrap an answerer so every model reply (answer and quotes) is kept in `sink`.
+
+    The report does not carry the quotes of attempts that were not returned, and the quotes
+    are exactly what the "correct answer flagged as garbage" question turns on.
+    """
+    def wrapped(*args, **kwargs):
+        reply = answerer(*args, **kwargs)
+        sink.append({"answer": reply.answer, "quotes": list(reply.quotes)})
+        return reply
+    return wrapped
+
+
+def run_case(agent, case, sink=None):
+    if sink is not None:
+        sink.clear()
     report = agent.run(case["question"])
     answer = report["answer"]
     return {"answer": answer, "outcome": scorer_for(case)(answer, case),
@@ -164,7 +179,9 @@ def run_case(agent, case):
             # What the checks objected to on the FIRST attempt (the retry's reason), so a
             # retry that changed nothing can be told from one that fixed something.
             "first_findings": next((step.get("details", []) for step in report["trace"]
-                                    if step["node"] == "verify"), [])}
+                                    if step["node"] == "verify"), []),
+            # Every reply the model gave for this question, in order.
+            "replies": list(sink) if sink is not None else []}
 
 
 def evaluate(answerer, suites, attempts=MAX_ATTEMPTS, budget=0.05, repeats=1, seed=0, log=print):
@@ -181,8 +198,11 @@ def evaluate(answerer, suites, attempts=MAX_ATTEMPTS, budget=0.05, repeats=1, se
         total = sum(len(cases) for _, cases in groups)
         done = 0
         for ctx, cases in groups:
-            arms = {"baseline": build_agent(ctx, answerer, budget_usd=budget, max_attempts=1),
-                    "loop": build_agent(ctx, answerer, budget_usd=budget, max_attempts=attempts)}
+            sinks = {"baseline": [], "loop": []}
+            arms = {"baseline": build_agent(ctx, recording(answerer, sinks["baseline"]),
+                                            budget_usd=budget, max_attempts=1),
+                    "loop": build_agent(ctx, recording(answerer, sinks["loop"]),
+                                        budget_usd=budget, max_attempts=attempts)}
             for case in cases:
                 done += 1
                 for repeat in range(repeats):
@@ -191,7 +211,7 @@ def evaluate(answerer, suites, attempts=MAX_ATTEMPTS, budget=0.05, repeats=1, se
                     row = {"suite": name, "question": case["question"],
                            "kind": case.get("kind", "golden"), "repeat": repeat}
                     for arm in order:
-                        row[arm] = run_case(arms[arm], case)
+                        row[arm] = run_case(arms[arm], case, sinks[arm])
                     rows.append(row)
                     log(f"  [{name} {done}/{total}.{repeat + 1}] "
                         f"baseline={row['baseline']['outcome']} loop={row['loop']['outcome']} "

@@ -104,6 +104,9 @@ check("the relational question is answered correctly by both arms, with no retry
 check("each run records what the first attempt was objected to for",
       all("first_findings" in row["loop"] and "first_findings" in row["baseline"] for row in rows)
       and all(row["loop"]["first_findings"] == [] for row in rows if row["loop"]["attempts"] == 1), True)
+check("every run keeps the model's replies, answers and quotes, one per attempt",
+      all(len(row[arm]["replies"]) == row[arm]["attempts"] and all("quotes" in r for r in row[arm]["replies"])
+          for row in rows for arm in ("baseline", "loop")), True)
 check("baseline is one attempt, always", {row["baseline"]["attempts"] for row in rows}, {1})
 
 summary = eval_agent.summarize({"damaged": rows}, out=lambda *_: None)["damaged"]
