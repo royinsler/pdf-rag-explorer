@@ -370,13 +370,14 @@ Faithfulness is not correctness, which is why they are scored apart.
 Everything except `smoke_resume.py` is deterministic and needs no API key:
 
 ```bash
-python test_verification.py        # 25 cases — quotes, dates, garbage echoes, provenance
+python test_verification.py        # 29 cases — quotes, dates, garbage echoes, provenance
 python test_damaged_values.py      # 10 cases — damage detection vs. correct Hebrew prose
 python test_damage_regression.py   # the three failure modes of §4, each still caught
 python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-or-nothing totals
 python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
 python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
+python test_quote_debris.py         # 7 cases — damaged evidence in a faithful quote does not fail a correct answer
 python test_eval_agent.py           # 34 cases — the agent eval's scoring and comparison, on scripted answers
 python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python test_agent_memory.py         # 46 cases — retry memory: counters, policy, probes, privacy dump, loop, CLI
@@ -403,6 +404,13 @@ and are skipped, loudly, without it.
     tell whether it helped.
 *   **Hedged requests** to attack the tail-latency decay measured above — the right answer
     to stragglers, at the cost of duplicate spend.
+*   **Debris in quotes (changed after the 87-run eval).** The live JSON showed correct, clean answers
+    ("750 ש"ח", "ארבע שעות") marked `degraded` because the exact quote they cite contains OCR debris, and a
+    quote has to be exact. The echo check now reads the **answer**; debris that is only in a quote is
+    reported separately (`damaged_quotes`, a quiet note in the UI) and neither fails the answer nor triggers a
+    retry. **Cost, asserted in `test_quote_debris.py`:** a fluent invented answer with no figures, no long
+    overlap with a damaged passage and debris only in its quote is no longer caught by this check.
+    Not re-measured live yet.
 *   **The relational false alarms.** In the 13-document run, retries on the three relational questions (damage near an intact answer) produced identical answers 9 times out of 9 and cost 2-3 attempts each, one ending `degraded` on a correct answer. `--json` now records the first attempt's findings; run it and see which check fires before changing anything.
 *   **Measure the agent properly.** The damaged suite has since grown from 6 to 13 documents (29 questions, all lost-date damage), but the numbers above are from the smaller run; re-run `eval_agent.py --suite damaged --repeats 3` for the larger one. `eval_agent.py` and `eval_caveat.py` have had live runs (see
     "What the live evals showed"), on a handful of questions. Next: many more damaged documents

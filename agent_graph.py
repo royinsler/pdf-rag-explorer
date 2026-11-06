@@ -45,7 +45,7 @@ from agent_state import (MAX_ATTEMPTS, SCHEMA_VERSION, STATUS_BUDGET,
 from agent_tools import (DocumentContext, MAX_TOOL_OUTPUT_CHARS, build_tools,
                          run_tool)
 from cost_tracking import UsageCallback
-from verification import (answer_rests_on_damage, find_ocr_garbage_echoes,
+from verification import (answer_rests_on_damage, find_ocr_garbage_echoes, quote_only_debris,
                           verify_answer_facts, verify_quotes)
 
 # Tool calls per investigate step. Re-OCR is the slow one; this keeps a single
@@ -79,7 +79,8 @@ def collect_findings(answer: str, quotes: List[str], ctx: DocumentContext) -> Li
     for value, found in verify_answer_facts(answer, doc):
         if not found:
             findings.append({"kind": "unverified_fact", "detail": value})
-    for run in find_ocr_garbage_echoes(answer + " " + " ".join(quotes), doc):
+    # The answer only: debris in a faithful quote is reported separately (quote_only_debris).
+    for run in find_ocr_garbage_echoes(answer, doc):
         findings.append({"kind": "garbage_echo", "detail": run})
     for snippet, _overlap in answer_rests_on_damage(answer, [d.snippet for d in ctx.damaged]):
         findings.append({"kind": "damage_provenance", "detail": snippet})
@@ -326,7 +327,7 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
         if best is None:                                  # the model never produced anything
             status = STATUS_FAILED
             warnings.append(f"The model could not be reached: {state.get('error')}")
-            report = {"answer": "", "quotes": [], "facts": [], "echoes": [], "rests_on": [],
+            report = {"answer": "", "quotes": [], "facts": [], "echoes": [], "damaged_quotes": [], "rests_on": [],
                       "findings": []}
         else:
             answer, quotes = best["answer"], best["quotes"]
@@ -334,7 +335,8 @@ def build_agent(ctx: DocumentContext, answer_fn: AnswerFn, *,
                 "answer": answer,
                 "quotes": verify_quotes(quotes, doc),
                 "facts": verify_answer_facts(answer, doc),
-                "echoes": find_ocr_garbage_echoes(answer + " " + " ".join(quotes), doc),
+                "echoes": find_ocr_garbage_echoes(answer, doc),
+                "damaged_quotes": quote_only_debris(answer, quotes, doc),
                 "rests_on": answer_rests_on_damage(answer, [d.snippet for d in ctx.damaged]),
                 "findings": best["findings"],
             }

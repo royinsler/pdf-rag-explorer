@@ -142,6 +142,24 @@ def find_ocr_garbage_echoes(answer, source_text, allowlist=_LATIN_ALLOWLIST):
             echoes.append(run)
     return echoes
 
+def quote_only_debris(answer, quotes, source_text):
+    """OCR gibberish that appears in the quoted evidence but not in the answer itself.
+
+    A quote must be copied exactly (verify_quotes rejects a "tidied" one), so quoting a
+    sentence that sits next to damage copies the damage too. That is not the answer
+    repeating garbage, and treating it as such marks correct answers as broken (the
+    87-run live eval: "750 ש\"ח" flagged because its supporting quote contained DWNT).
+    It is still worth showing - the evidence is damaged - so it is reported separately and
+    does not by itself fail an answer or trigger a retry.
+
+    KNOWN COST: a fluent invented answer with no numbers, no overlap with a damaged passage
+    and debris only in its quote used to be caught here and no longer is. The prompt's damage
+    caveat and the provenance check remain; see test_damage_regression.py.
+    """
+    in_answer = set(find_ocr_garbage_echoes(answer, source_text))
+    return [run for run in find_ocr_garbage_echoes(" ".join(quotes), source_text) if run not in in_answer]
+
+
 def answer_rests_on_damage(answer, damaged_snippets, min_overlap=25):
     """Report which damaged passages an answer was drawn from.
 

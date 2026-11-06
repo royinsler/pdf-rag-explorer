@@ -122,7 +122,7 @@ from extraction import (extract_document, drop_tiny_chunks, fits_in_context,
                         ocr_caveat, OCR_MIN_CONFIDENCE)
 # Verification lives in verification.py so it can be tested directly.
 from verification import (verify_quotes, verify_answer_facts,
-                          find_ocr_garbage_echoes, answer_rests_on_damage)
+                          find_ocr_garbage_echoes, answer_rests_on_damage, quote_only_debris)
 # Damaged-value detection lives in damaged_values.py — it is pure text analysis
 # with no Streamlit or OpenAI dependency, so it can be tested directly.
 from damaged_values import detect_damaged_values, damage_caveat
@@ -313,6 +313,13 @@ def render_extraction_report():
                         unsafe_allow_html=True)
                 else:
                     st.markdown(f"> {item.snippet}")
+
+
+def render_damaged_quotes(runs):
+    """A gentle note: the answer is clean, but the passage it quotes contains OCR damage."""
+    if runs:
+        st.caption("ℹ️ The quoted passage contains text extraction could not read ("
+                   + ", ".join(runs) + "). The answer itself does not repeat it.")
 
 
 def render_garbage_echoes(echoes):
@@ -691,6 +698,7 @@ if uploaded_file:
             with st.chat_message("assistant"):
                 st.markdown(turn["bot"])
                 render_garbage_echoes(turn.get("echoes", []))
+                render_damaged_quotes(turn.get("damaged_quotes", []))
                 render_damage_provenance(turn.get("rests_on", []))
                 render_fact_check(turn.get("facts", []))
                 if turn.get("quotes"):
@@ -729,14 +737,15 @@ if uploaded_file:
                 # read cleanly while the evidence it offers is gibberish — which is
                 # exactly what this document produced once the prompt stopped the
                 # model quoting garbage in the answer itself.
-                echoes = find_ocr_garbage_echoes(
-                    answer + " " + " ".join(q for q, _ in quotes),
-                    st.session_state.doc_text)
+                echoes = find_ocr_garbage_echoes(answer, st.session_state.doc_text)
+                damaged_quotes = quote_only_debris(
+                    answer, [q for q, _ in quotes], st.session_state.doc_text)
                 resting_on = answer_rests_on_damage(
                     answer, [d.snippet for d in st.session_state.damaged_values])
 
                 st.markdown(answer)
                 render_garbage_echoes(echoes)
+                render_damaged_quotes(damaged_quotes)
                 render_damage_provenance(resting_on)
                 render_fact_check(facts)
                 if quotes:
@@ -748,6 +757,7 @@ if uploaded_file:
                 st.session_state.chat_history.append(
                     {"user": prompt, "bot": answer, "sources": sources,
                      "quotes": quotes, "facts": facts, "echoes": echoes,
+                     "damaged_quotes": damaged_quotes,
                      "rests_on": resting_on})
                 st.rerun()
 

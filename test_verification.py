@@ -10,7 +10,7 @@ Runs on the standard library alone: python3 test_verification.py
 import sys
 
 from verification import (verify_quotes, verify_answer_facts, _canon_date,
-                          find_ocr_garbage_echoes, answer_rests_on_damage)
+                          find_ocr_garbage_echoes, answer_rests_on_damage, quote_only_debris)
 
 results = []
 
@@ -95,6 +95,16 @@ check("a short incidental overlap does not count",
       answer_rests_on_damage("ביצוע עבדות", DAMAGED), [])
 check("no damaged passages means nothing to rest on",
       answer_rests_on_damage("כל תשובה שהיא", []), [])
+
+
+# --- quote_only_debris: damaged evidence is reported, but is not the answer's fault ----------
+check("debris only in the quote is reported as such",
+      quote_only_debris("הכניסה אפשרית", ["הכניסה החל DYN 6,"], DOC), ["DYN"])
+check("debris the answer itself repeats is the answer's problem, not listed twice",
+      quote_only_debris("הכניסה החל DYN 6,", ["הכניסה החל DYN 6,"], DOC), [])
+check("a clean answer with a clean quote has none", quote_only_debris("תשובה", ["ציטוט נקי"], DOC), [])
+check("a Latin run the document never had is not debris here either",
+      quote_only_debris("תשובה", ["ZQX"], DOC), [])
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
