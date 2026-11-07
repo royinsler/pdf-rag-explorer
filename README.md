@@ -378,6 +378,7 @@ python test_agent_tools.py         # 58 cases — tools, schemas, corroboration,
 python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
 python test_quote_debris.py         # 19 cases — damaged evidence in a faithful quote does not fail a correct answer
+python test_judge_experiment.py     # 4 cases — offline judge experiment: selection and verdict, no API
 python test_eval_agent.py           # 34 cases — the agent eval's scoring and comparison, on scripted answers
 python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python test_agent_memory.py         # 46 cases — retry memory: counters, policy, probes, privacy dump, loop, CLI
