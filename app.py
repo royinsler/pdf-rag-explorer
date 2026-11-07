@@ -122,7 +122,7 @@ from extraction import (extract_document, drop_tiny_chunks, fits_in_context,
                         ocr_caveat, OCR_MIN_CONFIDENCE)
 # Verification lives in verification.py so it can be tested directly.
 from verification import (verify_quotes, verify_answer_facts,
-                          find_ocr_garbage_echoes, answer_rests_on_damage, quote_only_debris)
+                          find_ocr_garbage_echoes, answer_rests_on_damage, split_debris)
 # Damaged-value detection lives in damaged_values.py — it is pure text analysis
 # with no Streamlit or OpenAI dependency, so it can be tested directly.
 from damaged_values import detect_damaged_values, damage_caveat
@@ -737,8 +737,7 @@ if uploaded_file:
                 # read cleanly while the evidence it offers is gibberish — which is
                 # exactly what this document produced once the prompt stopped the
                 # model quoting garbage in the answer itself.
-                echoes = find_ocr_garbage_echoes(answer, st.session_state.doc_text)
-                damaged_quotes = quote_only_debris(
+                echoes, damaged_quotes = split_debris(
                     answer, [q for q, _ in quotes], st.session_state.doc_text)
                 resting_on = answer_rests_on_damage(
                     answer, [d.snippet for d in st.session_state.damaged_values])

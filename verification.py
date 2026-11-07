@@ -160,6 +160,48 @@ def quote_only_debris(answer, quotes, source_text):
     return [run for run in find_ocr_garbage_echoes(" ".join(quotes), source_text) if run not in in_answer]
 
 
+_FIGURE_RE = re.compile(r"\d[\d,]*\d|\d")
+
+
+def _grounding_figures(text):
+    """Numbers in `text` that could stand behind an answer: 3+ digits, not a bare year.
+
+    Deliberately narrow. A bare "6" is what a collapsed clause number leaves behind (the
+    original DYN failure answered "החל מיום 6"), and a bare year like 2027 is routinely
+    borrowed from an unrelated clause. Either would let a wrong answer pass as grounded, so
+    neither counts; every exclusion makes the check stricter, never looser.
+    """
+    figures = set()
+    for token in _FIGURE_RE.findall(text):
+        digits = token.replace(",", "")
+        if len(digits) < 3 or re.fullmatch(r"(19|20)\d\d", digits):
+            continue
+        figures.add(digits)
+    return figures
+
+
+def split_debris(answer, quotes, source_text):
+    """(hard, soft): which OCR debris should fail the answer, and which is only a note.
+
+    Debris in the answer itself is always hard. Debris only in the quotes is soft ONLY when
+    the answer carries at least one figure that the document really contains (see
+    _grounding_figures) and no date or amount it does not: then something checkable stands
+    behind the answer, and the quote is merely a faithful copy of a sentence that sits next to
+    damage ("750 ש\"ח" quoted with its whole sentence). With no such figure ("ארבע שעות", but
+    also the wrong "המסירה בפועל.") nothing separates a correct answer from a wrong one
+    without reading the question, so the debris stays hard. That leaves correct word-only
+    answers flagged: the known remaining cost.
+    """
+    in_answer = find_ocr_garbage_echoes(answer, source_text)
+    quote_only = quote_only_debris(answer, quotes, source_text)
+    facts_ok = all(found for _, found in verify_answer_facts(answer, source_text))
+    figures = _grounding_figures(answer)
+    grounded = facts_ok and bool(figures) and figures <= _grounding_figures(source_text)
+    if grounded:
+        return in_answer, quote_only
+    return in_answer + quote_only, []
+
+
 def answer_rests_on_damage(answer, damaged_snippets, min_overlap=25):
     """Report which damaged passages an answer was drawn from.
 

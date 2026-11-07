@@ -377,7 +377,7 @@ python test_cost_tracking.py       # 12 cases — pricing, unpriced calls, all-o
 python test_agent_tools.py         # 58 cases — tools, schemas, corroboration, a real Tesseract re-read
 python test_agent_graph.py         # 80 cases — every way the loop can fail, resume, privacy, CLI
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
-python test_quote_debris.py         # 7 cases — damaged evidence in a faithful quote does not fail a correct answer
+python test_quote_debris.py         # 19 cases — damaged evidence in a faithful quote does not fail a correct answer
 python test_eval_agent.py           # 34 cases — the agent eval's scoring and comparison, on scripted answers
 python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python test_agent_memory.py         # 46 cases — retry memory: counters, policy, probes, privacy dump, loop, CLI
@@ -406,11 +406,14 @@ and are skipped, loudly, without it.
     to stragglers, at the cost of duplicate spend.
 *   **Debris in quotes (changed after the 87-run eval).** The live JSON showed correct, clean answers
     ("750 ש"ח", "ארבע שעות") marked `degraded` because the exact quote they cite contains OCR debris, and a
-    quote has to be exact. The echo check now reads the **answer**; debris that is only in a quote is
-    reported separately (`damaged_quotes`, a quiet note in the UI) and neither fails the answer nor triggers a
-    retry. **Cost, asserted in `test_quote_debris.py`:** a fluent invented answer with no figures, no long
-    overlap with a damaged passage and debris only in its quote is no longer caught by this check.
-    Not re-measured live yet.
+    quote has to be exact. Debris in the **answer** is always a finding. Debris only in a **quote** is a
+    quiet note (`damaged_quotes`, shown in the UI) **only when the answer carries a verified figure**: a
+    number of 3+ digits that is not a bare year, present in the document, with no date or amount the
+    document lacks (`verification.split_debris`). Otherwise it stays a finding. **Cost, asserted in
+    `test_quote_debris.py`:** a correct word-only answer ("ארבע שעות", "הריבית") is still flagged, because
+    without reading the question it looks exactly like the wrong "המסירה בפועל.". Replayed on the earlier
+    live JSON: the 750 control is clean in 5 of 5 runs, the wrong relational answers are still caught in
+    6 of 6. Not re-measured live yet.
 *   **The relational false alarms.** In the 13-document run, retries on the three relational questions (damage near an intact answer) produced identical answers 9 times out of 9 and cost 2-3 attempts each, one ending `degraded` on a correct answer. `--json` now records the first attempt's findings; run it and see which check fires before changing anything.
 *   **Measure the agent properly.** The damaged suite has since grown from 6 to 13 documents (29 questions, all lost-date damage), but the numbers above are from the smaller run; re-run `eval_agent.py --suite damaged --repeats 3` for the larger one. `eval_agent.py` and `eval_caveat.py` have had live runs (see
     "What the live evals showed"), on a handful of questions. Next: many more damaged documents

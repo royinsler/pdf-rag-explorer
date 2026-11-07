@@ -63,13 +63,51 @@ check("debris the ANSWER repeats is still a finding",
 check("a quote that is not in the document is still a finding",
       [f["kind"] for f in collect_findings("750 ש\"ח", ["פיצוי של 999 ש\"ח"], ctx)], ["fabricated_quote"])
 check("a date the document does not contain is still a finding",
-      [f["kind"] for f in collect_findings("עד 1.1.2031", [DAMAGED_QUOTE], ctx)], ["unverified_fact"])
+      "unverified_fact" in [f["kind"] for f in collect_findings("עד 1.1.2031", [DAMAGED_QUOTE], ctx)], True)
 
-# KNOWN LIMITATION, asserted so it stays visible: a fluent invented answer with no figures, no
-# long overlap with the damaged passage, and debris only in its quote now passes. Before this
-# change the debris in the quote caught it. Delete this block deliberately if that is fixed.
+# With no verified figure behind the answer, debris in the quote stays as hard as debris in the
+# answer: a fluent invented substitute is caught, and so is the wrong word-only "המסירה בפועל.".
 invented = collect_findings("הפיצוי מתחיל ביום חתימת ההסכם", [DAMAGED_QUOTE], ctx)
-check("KNOWN LIMITATION: a fluent invented substitute with a damaged quote is no longer caught", invented, [])
+check("a fluent invented substitute with a damaged quote is still caught",
+      [f["kind"] for f in invented], ["garbage_echo"])
+wrong = collect_findings("המסירה בפועל.", [DAMAGED_QUOTE], ctx)
+check("the wrong word-only answer from the live eval is still caught",
+      [f["kind"] for f in wrong], ["garbage_echo"])
+
+check("the original failure shape, a bare clause number as the answer, stays caught",
+      [f["kind"] for f in collect_findings("החל מיום 6", [DAMAGED_QUOTE.replace("החמישה עשר", "6")], ctx)
+       if f["kind"] == "garbage_echo"], ["garbage_echo"])
+check("a bare year borrowed from elsewhere does not ground an answer",
+      [f["kind"] for f in collect_findings("בשנת 2027", [DAMAGED_QUOTE], ctx)
+       if f["kind"] == "garbage_echo"], ["garbage_echo"])
+check("a figure the document does contain, with a faithful damaged quote, grounds it",
+      collect_findings("הפיצוי הוא 750 ש\"ח לכל איחור", [DAMAGED_QUOTE], ctx), [])
+
+# KNOWN REMAINING COST, asserted so it stays visible: a CORRECT word-only answer ("ארבע שעות")
+# looks exactly like the wrong one above without reading the question, so it is flagged too.
+case2 = next(c for c in DAMAGED_CASES if c["id"] == "relational2")
+d2 = detect_damaged_values(case2["text"], case2["low_confidence"])
+ctx2 = DocumentContext(text=case2["text"], damaged=list(d2), caveat=damage_caveat(d2))
+q2 = "זמן התגובה לתקלה קריטית הוא ארבע שעות, החל מרגע קבלת הפנייה DION במוקד."
+check("KNOWN REMAINING COST: a correct word-only answer with a damaged quote is still flagged",
+      [f["kind"] for f in collect_findings("ארבע שעות", [q2], ctx2)], ["garbage_echo"])
+
+# Direct checks of the grounding rule, built so each condition has a test that fails without it.
+from verification import _grounding_figures, split_debris
+
+check("grounding figures: 1-2 digit numbers are ignored", _grounding_figures("סעיף 6 ו-15"), set())
+check("grounding figures: bare years are ignored", _grounding_figures("בשנת 2027 ו-1999"), set())
+check("grounding figures: 3+ digit amounts count, commas removed", _grounding_figures('750 ש"ח ו-1,250'), {"750", "1250"})
+DOC = 'פיצוי של 750 ש"ח, בסעיף 6, בשנת 2027, החל מהיום DWNT לאיחור.'
+Q = ["החל מהיום DWNT לאיחור"]
+check("a bare number present in the document does not ground: debris stays hard",
+      split_debris("סעיף 6", Q, DOC), (["DWNT"], []))
+check("a bare year present in the document does not ground: debris stays hard",
+      split_debris("בשנת 2027", Q, DOC), (["DWNT"], []))
+check("a real figure grounds: debris becomes a soft note",
+      split_debris('750 ש"ח', Q, DOC), ([], ["DWNT"]))
+check("a real figure alongside a date the document lacks does not ground",
+      split_debris('750 ש"ח עד 1.1.2031', Q, DOC), (["DWNT"], []))
 
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)
