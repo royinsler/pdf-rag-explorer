@@ -84,6 +84,9 @@ def main(argv=None, judge=judge_once, out=print):
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--repeats", type=int, default=1)
     args = parser.parse_args(argv)
+    if not args.dry_run and judge is judge_once:
+        from dotenv import load_dotenv
+        load_dotenv()
     with open(args.json_path, encoding="utf-8") as handle:
         cases = ambiguous_cases(json.load(handle))
     good = sum(1 for c in cases if c[3])
