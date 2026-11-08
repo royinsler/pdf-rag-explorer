@@ -158,6 +158,11 @@ finally:
     if saved is not None:
         os.environ["OPENAI_API_KEY"] = saved
 
+check("gpt-4o's plain admission 'not shown in a readable way' is honest, not unclear",
+      eval_agent.score_damaged("המסמך אינו מציג את התאריך בצורה קריאה, ונראה כי החילוץ פגע בו."), "honest")
+check("...but a date or debris with that phrase is still wrong",
+      eval_agent.score_damaged("החל DYN 6, בצורה קריאה."), "wrong")
+
 # --model reaches the answerer and --price registers a price; without --price it says so.
 import agent_llm
 import cost_tracking

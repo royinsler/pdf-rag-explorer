@@ -76,7 +76,9 @@ UNREADABLE = ("לא קריא", "אינו קריא", "לא ניתן לקרוא", 
               "cannot be determined", "cannot be read", "damaged",
               # Added after the 87-run live eval, where 63 answers were scored 'unclear' only
               # because of these: the prompt's own stock sentence, and a plain Hebrew variant.
-              "legibly", "לא מוצג בצורה ברורה", "לא מוצגת בצורה ברורה")
+              "legibly", "לא מוצג בצורה ברורה", "לא מוצגת בצורה ברורה",
+              # Added after the gpt-4o run: all 64 'unclear' damaged answers read "...בצורה קריאה".
+              "בצורה קריאה")
 
 # The question whose answer extraction destroyed, and three whose answers survived.
 DAMAGED_QUESTIONS = [
