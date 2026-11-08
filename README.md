@@ -422,6 +422,16 @@ and are skipped, loudly, without it.
     3 of 3 and burns 2-3 attempts. The wrong "המסירה בפועל." stays wrong in 3 of 3 but is still flagged
     `degraded`. Of 12 retries: 3 changed the answer, 3 changed only the status, 6 did nothing. An offline
     LLM judge (`judge_experiment.py`) called the wrong answer correct in 3 of 3 and was not integrated.
+*   **A different model changes what the checks see (measured with `--model gpt-4o`, 87 runs per arm).**
+    gpt-4o does not echo the OCR debris (0 wrong answers) but it refuses answerable questions near damage:
+    all 9 relational runs refused, including the two (`ארבע שעות`, `הריבית`) that mini answers correctly, and it
+    never gave the right answer to the original relational question. It also **quotes the damaged sentence
+    inside an honest "unreadable" answer**, which the debris-in-quote rule flags: 33 of 87 runs `degraded` on
+    answers that were correct admissions, and the loop's 40 retries changed nothing (+57% cost). mini does
+    not quote in those admissions, so this has not been fixed; the candidate fix (treat debris in a quote as a
+    note when the answer itself says the value is unreadable) was deliberately not applied. Check this before
+    switching models. Routing mini -> a stronger model on retry was considered and not built: it would turn
+    answers into refusals.
 *   **The relational false alarms.** In the 13-document run, retries on the three relational questions (damage near an intact answer) produced identical answers 9 times out of 9 and cost 2-3 attempts each, one ending `degraded` on a correct answer. `--json` now records the first attempt's findings; run it and see which check fires before changing anything.
 *   **Measure the agent properly.** The damaged suite has since grown from 6 to 13 documents (29 questions, all lost-date damage), but the numbers above are from the smaller run; re-run `eval_agent.py --suite damaged --repeats 3` for the larger one. `eval_agent.py` and `eval_caveat.py` have had live runs (see
     "What the live evals showed"), on a handful of questions. Next: many more damaged documents
