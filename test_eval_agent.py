@@ -158,5 +158,37 @@ finally:
     if saved is not None:
         os.environ["OPENAI_API_KEY"] = saved
 
+# --model reaches the answerer and --price registers a price; without --price it says so.
+import agent_llm
+import cost_tracking
+seen = {}
+real_make = agent_llm.make_openai_answerer
+agent_llm.make_openai_answerer = lambda models=(): seen.setdefault("models", models) and (lambda *a, **k: None)
+real_load = dotenv.load_dotenv
+dotenv.load_dotenv = lambda *a, **k: None
+os.environ["OPENAI_API_KEY"] = "x"
+lines = []
+real_evaluate = eval_agent.evaluate
+eval_agent.evaluate = lambda *a, **k: {}
+real_summarize = eval_agent.summarize
+eval_agent.summarize = lambda *a, **k: None
+try:
+    eval_agent.main(["--suite", "clean", "--model", "model-x", "--price", "2", "8"], out=lines.append)
+    check("--model is passed to the answerer", seen.get("models"), ("model-x",))
+    check("--price registers the model's price", cost_tracking.PRICES_PER_MTOK.get("model-x"), (2.0, 8.0))
+    lines.clear()
+    eval_agent.main(["--suite", "clean", "--model", "model-y"], out=lines.append)
+    check("without --price the user is told the cost is unpriced",
+          (any("unpriced" in l for l in lines), "model-y" in cost_tracking.PRICES_PER_MTOK), (True, False))
+finally:
+    agent_llm.make_openai_answerer = real_make
+    dotenv.load_dotenv = real_load
+    eval_agent.evaluate, eval_agent.summarize = real_evaluate, real_summarize
+    cost_tracking.PRICES_PER_MTOK.pop("model-x", None)
+    if saved is not None:
+        os.environ["OPENAI_API_KEY"] = saved
+    else:
+        os.environ.pop("OPENAI_API_KEY", None)
+
 print(f"\n{sum(results)}/{len(results)} passed")
 sys.exit(0 if all(results) else 1)

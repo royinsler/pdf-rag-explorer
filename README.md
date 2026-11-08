@@ -379,7 +379,7 @@ python test_agent_graph.py         # 80 cases — every way the loop can fail, r
 python test_probe_reread.py         # 25 cases — the re-read experiment's report, checked against known pages
 python test_quote_debris.py         # 19 cases — damaged evidence in a faithful quote does not fail a correct answer
 python test_judge_experiment.py     # 4 cases — offline judge experiment: selection and verdict, no API
-python test_eval_agent.py           # 34 cases — the agent eval's scoring and comparison, on scripted answers
+python test_eval_agent.py           # 37 cases — the agent eval's scoring and comparison, on scripted answers
 python test_eval_caveat.py          # 13 cases — the caveat experiment and the candidate wording
 python test_agent_memory.py         # 46 cases — retry memory: counters, policy, probes, privacy dump, loop, CLI
 python smoke_resume.py             # one API call: exercises the résumé path
@@ -414,7 +414,14 @@ and are skipped, loudly, without it.
     `test_quote_debris.py`:** a correct word-only answer ("ארבע שעות", "הריבית") is still flagged, because
     without reading the question it looks exactly like the wrong "המסירה בפועל.". Replayed on the earlier
     live JSON: the 750 control is clean in 5 of 5 runs, the wrong relational answers are still caught in
-    6 of 6. Not re-measured live yet.
+    6 of 6.
+    **Measured live (87 runs per arm, gpt-4o-mini, `--suite damaged --repeats 3`):** good answers 82/87
+    baseline vs 84/87 loop; the loop fixed 2 and broke 0; controls 45/45 in both; `degraded` 11 -> 6;
+    cost +18%. The 750 control is `verified` in 1 attempt in 6 of 6 runs. "ארבע שעות" is fixed by the
+    retry (a shorter quote that stops before the debris). "הריבית" (correct answer) stays `degraded` in
+    3 of 3 and burns 2-3 attempts. The wrong "המסירה בפועל." stays wrong in 3 of 3 but is still flagged
+    `degraded`. Of 12 retries: 3 changed the answer, 3 changed only the status, 6 did nothing. An offline
+    LLM judge (`judge_experiment.py`) called the wrong answer correct in 3 of 3 and was not integrated.
 *   **The relational false alarms.** In the 13-document run, retries on the three relational questions (damage near an intact answer) produced identical answers 9 times out of 9 and cost 2-3 attempts each, one ending `degraded` on a correct answer. `--json` now records the first attempt's findings; run it and see which check fires before changing anything.
 *   **Measure the agent properly.** The damaged suite has since grown from 6 to 13 documents (29 questions, all lost-date damage), but the numbers above are from the smaller run; re-run `eval_agent.py --suite damaged --repeats 3` for the larger one. `eval_agent.py` and `eval_caveat.py` have had live runs (see
     "What the live evals showed"), on a handful of questions. Next: many more damaged documents

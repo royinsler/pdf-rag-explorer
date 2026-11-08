@@ -280,6 +280,10 @@ def main(argv=None, answerer=None, out=print):
     parser.add_argument("--repeats", type=int, default=1, help="runs per question and arm (default 1)")
     parser.add_argument("--attempts", type=int, default=MAX_ATTEMPTS, help="the loop arm's attempt limit")
     parser.add_argument("--budget", type=float, default=0.05, help="USD per question (default 0.05)")
+    parser.add_argument("--model", default=None, help="answering model for BOTH arms (default: the app's)")
+    parser.add_argument("--price", nargs=2, type=float, metavar=("IN", "OUT"),
+                        help="USD per million input/output tokens for --model; the repo does not "
+                             "know other models' prices, so without this their cost is reported as unpriced")
     parser.add_argument("--json", metavar="PATH", help="write every run, answers included, to this file")
     args = parser.parse_args(argv)
 
@@ -290,7 +294,16 @@ def main(argv=None, answerer=None, out=print):
             out("OPENAI_API_KEY is not set (environment or .env).")
             return 2
         from agent_llm import make_openai_answerer
-        answerer = make_openai_answerer()
+        if args.model:
+            answerer = make_openai_answerer(models=(args.model,))
+            if args.price:
+                from cost_tracking import PRICES_PER_MTOK
+                PRICES_PER_MTOK[args.model] = tuple(args.price)
+            else:
+                out(f"No --price for {args.model}: its cost will be reported as unpriced.")
+            out(f"model: {args.model}")
+        else:
+            answerer = make_openai_answerer()
 
     suites = build_suites()
     if args.suite != "all":
